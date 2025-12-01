@@ -222,7 +222,7 @@ router.get('/:login', async (req, res) => {
       godfathers = [];
     }
     
-    res.json({
+    res.json({student: {
       id: student.id,
       login: student.login,
       displayname: student.displayname,
@@ -246,7 +246,7 @@ router.get('/:login', async (req, res) => {
       avgRating: Math.round(avgRating * 100) / 100,
       logTimes,
       attendanceDays
-    });
+    }});
   } catch (error) {
     console.error('Student fetch error:', error);
     res.status(500).json({ 
