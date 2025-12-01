@@ -35,16 +35,22 @@ router.get('/', async (req, res) => {
     // Build campus filter
     const campusFilter = validatedCampusId !== null ? { campusId: validatedCampusId } : {};
     
+    console.log('Dashboard query - campusFilter:', campusFilter);
+    
     // 1. Top Project Submitters (current month)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    console.log('Month start:', monthStart);
+    
     let projectsThisMonth = [];
     try {
       const result = await Project.find({
         ...campusFilter,
         date: { $gte: monthStart }
       });
+      console.log('Projects found:', Array.isArray(result) ? result.length : 'not array', typeof result);
       // Filter validated projects in memory (Ottoman has issues with ? in field names)
       projectsThisMonth = Array.isArray(result) ? result.filter(p => p['validated?'] === true) : [];
+      console.log('Validated projects:', projectsThisMonth.length);
     } catch (dbError) {
       console.error('Error fetching projects:', dbError.message);
       projectsThisMonth = [];
@@ -180,8 +186,10 @@ router.get('/', async (req, res) => {
     let allTimeWallet = [];
     try {
       const result = await Student.find(campusFilter);
+      console.log('Students found for wallet:', Array.isArray(result) ? result.length : 'not array');
       const sorted = Array.isArray(result) ? result.sort((a, b) => (b.wallet || 0) - (a.wallet || 0)).slice(0, 10) : [];
       allTimeWallet = sorted;
+      console.log('Top wallet students:', allTimeWallet.length);
     } catch (dbError) {
       console.error('Error fetching wallet stats:', dbError.message);
       allTimeWallet = [];
@@ -246,6 +254,11 @@ router.get('/', async (req, res) => {
     let allStudents = [];
     try {
       const result = await Student.find(campusFilter);
+      console.log('All students found:', Array.isArray(result) ? result.length : 'not array', typeof result);
+      if (result && !Array.isArray(result)) {
+        console.log('Result keys:', Object.keys(result));
+        console.log('Result sample:', JSON.stringify(result).substring(0, 200));
+      }
       allStudents = Array.isArray(result) ? result : [];
     } catch (dbError) {
       console.error('Error fetching students for grade distribution:', dbError.message);
