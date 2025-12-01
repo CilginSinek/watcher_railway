@@ -26,13 +26,29 @@ async function connect() {
 
     console.log('Ottoman connected successfully');
     
-    // Ensure indexes are created
-    await ottoman.start();
-    console.log('Ottoman indexes ensured');
+    // Don't call ottoman.start() immediately - let models initialize first
+    console.log('Ottoman ready - models will be initialized on first use');
     
   } catch (error) {
     console.error('Ottoman connection error:', error);
     throw error;
+  }
+}
+
+/**
+ * Ensure indexes (call this after models are loaded)
+ */
+async function ensureIndexes() {
+  try {
+    if (!ottoman) {
+      throw new Error('Ottoman not connected');
+    }
+    console.log('Ensuring Ottoman indexes...');
+    await ottoman.start();
+    console.log('Ottoman indexes ensured');
+  } catch (error) {
+    console.error('Error ensuring indexes:', error);
+    // Don't throw - continue without indexes
   }
 }
 
@@ -60,5 +76,6 @@ module.exports = {
   connect,
   getOttoman,
   disconnect,
+  ensureIndexes,
   ottoman
 };

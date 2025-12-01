@@ -77,6 +77,15 @@ async function start() {
     try {
       await db.connect();
       console.log('Database connected successfully');
+      
+      // Ensure indexes after a short delay (models need to be registered)
+      setTimeout(async () => {
+        try {
+          await db.ensureIndexes();
+        } catch (indexError) {
+          console.error('Index creation error (non-fatal):', indexError.message);
+        }
+      }, 2000);
     } catch (dbError) {
       console.error('Database connection failed:', dbError.message);
       console.log('Server running without database connection');
