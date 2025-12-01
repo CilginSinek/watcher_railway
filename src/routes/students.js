@@ -150,7 +150,7 @@ router.get('/:login', async (req, res) => {
       host: l.host
     }));
     
-    // Get feedbacks
+    // Get feedbacks and calculate averages
     let feedbacks = [];
     try {
       const result = await Feedback.find({ login: validatedLogin });
@@ -159,89 +159,89 @@ router.get('/:login', async (req, res) => {
       console.error('Error fetching feedbacks:', dbError.message);
       feedbacks = [];
     }
-    const feedbacksData = feedbacks.map(f => ({
-      id: f.id,
-      login: f.login,
-      rating: f.rating,
-      comment: f.comment,
-      final_mark: f.final_mark,
-      created_at: f.created_at,
-      campusId: f.campusId
+    
+    // Calculate feedback averages
+    const feedbackCount = feedbacks.length;
+    const avgRating = feedbackCount > 0 
+      ? feedbacks.reduce((sum, f) => sum + (f.rating || 0), 0) / feedbackCount 
+      : 0;
+    
+    // Calculate logTimes (location history with duration)
+    const logTimes = locationStats.map(l => {
+      const beginAt = new Date(l.begin_at);
+      const endAt = l.end_at ? new Date(l.end_at) : new Date();
+      const duration = Math.floor((endAt - beginAt) / 60000); // minutes
+      return {
+        date: l.begin_at,
+        duration
+      };
+    });
+    
+    // Calculate attendanceDays (average hours per day of week)
+    const dayAttendance = { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] };
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    locationStats.forEach(l => {
+      const beginAt = new Date(l.begin_at);
+      const endAt = l.end_at ? new Date(l.end_at) : new Date();
+      const hours = (endAt - beginAt) / (1000 * 60 * 60);
+      const day = dayNames[beginAt.getDay()];
+      dayAttendance[day].push(hours);
+    });
+    
+    const attendanceDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => ({
+      day,
+      avgHours: dayAttendance[day].length > 0 
+        ? dayAttendance[day].reduce((sum, h) => sum + h, 0) / dayAttendance[day].length 
+        : 0
     }));
     
-    // Get patronage (as patron)
-    let asPatron = [];
-    let patroned = [];
+    // Get patronage (as patron - children)
+    let children = [];
     try {
       const result = await Patronage.find({ godfather_login: validatedLogin });
-      asPatron = result?.rows || [];
-      patroned = await Promise.all(
-        asPatron.map(async (p) => {
-          try {
-            const patronedStudent = await Student.findOne({ login: p.user_login });
-            return patronedStudent ? {
-              id: patronedStudent.id,
-              login: patronedStudent.login,
-              displayname: patronedStudent.displayname,
-              image: patronedStudent.image
-            } : null;
-          } catch (err) {
-            console.error(`Error fetching patroned student ${p.user_login}:`, err.message);
-            return null;
-          }
-        })
-      );
+      const asPatron = result?.rows || [];
+      children = asPatron.map(p => ({ login: p.user_login }));
     } catch (dbError) {
-      console.error('Error fetching patronage:', dbError.message);
-      patroned = [];
+      console.error('Error fetching patronage children:', dbError.message);
+      children = [];
     }
     
-    // Get patronage (as patroned)
-    let patron = null;
+    // Get patronage (as patroned - godfathers)
+    let godfathers = [];
     try {
-      const asPatroned = await Patronage.findOne({ user_login: validatedLogin });
-      if (asPatroned) {
-        const patronStudent = await Student.findOne({ login: asPatroned.godfather_login });
-        if (patronStudent) {
-          patron = {
-            id: patronStudent.id,
-            login: patronStudent.login,
-            displayname: patronStudent.displayname,
-            image: patronStudent.image
-          };
-        }
-      }
+      const result = await Patronage.find({ user_login: validatedLogin });
+      const asPatroned = result?.rows || [];
+      godfathers = asPatroned.map(p => ({ login: p.godfather_login }));
     } catch (dbError) {
-      console.error('Error fetching patron:', dbError.message);
-      patron = null;
+      console.error('Error fetching patronage godfathers:', dbError.message);
+      godfathers = [];
     }
     
     res.json({
-      student: {
-        id: student.id,
-        login: student.login,
-        email: student.email,
-        first_name: student.first_name,
-        last_name: student.last_name,
-        displayname: student.displayname,
-        usual_full_name: student.usual_full_name,
-        pool_month: student.pool_month,
-        pool_year: student.pool_year,
-        wallet: student.wallet,
-        correction_point: student.correction_point,
-        level: student.level,
-        "active?": student["active?"],
-        grade: student.grade,
-        campusId: student.campusId,
-        image: student.image
-      },
+      id: student.id,
+      login: student.login,
+      displayname: student.displayname,
+      email: student.email,
+      image: student.image,
+      correction_point: student.correction_point,
+      wallet: student.wallet,
+      location: student.location,
+      'active?': student['active?'],
+      'alumni?': student['alumni?'],
+      is_piscine: student.is_piscine,
+      is_trans: student.is_trans,
+      grade: student.grade,
+      project_count: projects.length,
       projects: projectsData,
-      locationStats: locationData,
-      feedbacks: feedbacksData,
       patronage: {
-        patron,
-        patroned: patroned.filter(p => p !== null)
-      }
+        godfathers,
+        children
+      },
+      feedbackCount,
+      avgRating: Math.round(avgRating * 100) / 100,
+      logTimes,
+      attendanceDays
     });
   } catch (error) {
     console.error('Student fetch error:', error);
@@ -338,14 +338,22 @@ router.get('/', async (req, res) => {
       let aVal = a[validatedSort];
       let bVal = b[validatedSort];
       
-      if (aVal === null || aVal === undefined) aVal = '';
-      if (bVal === null || bVal === undefined) bVal = '';
+      // Handle null/undefined
+      if (aVal === null || aVal === undefined) aVal = typeof bVal === 'number' ? -Infinity : '';
+      if (bVal === null || bVal === undefined) bVal = typeof aVal === 'number' ? -Infinity : '';
       
+      // String comparison (case-insensitive)
       if (typeof aVal === 'string') {
         aVal = aVal.toLowerCase();
-        bVal = bVal.toLowerCase();
+        bVal = (bVal || '').toString().toLowerCase();
       }
       
+      // Number comparison
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      
+      // Default comparison
       if (validatedOrder === 'asc') {
         return aVal > bVal ? 1 : -1;
       } else {

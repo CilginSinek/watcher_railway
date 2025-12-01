@@ -236,13 +236,12 @@ router.get('/', async (req, res) => {
       value
     }));
     
-    // 8. Hourly Occupancy (last 7 days average)
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    // 8. Hourly Occupancy (last 3 months average)
     let recentLocations = [];
     try {
       const result = await LocationStats.find({
         ...campusFilter,
-        begin_at: { $gte: sevenDaysAgo }
+        begin_at: { $gte: threeMonthsAgo } // Use same threeMonthsAgo from topLocationStats
       });
       recentLocations = result?.rows || [];
     } catch (dbError) {
@@ -250,39 +249,55 @@ router.get('/', async (req, res) => {
       recentLocations = [];
     }
     
-    const hourlyCount = Array(24).fill(0);
-    const hourlyTotal = Array(24).fill(0);
+    // Track unique students per hour across all days
+    const hourlyStudents = Array(24).fill(null).map(() => new Set());
     
     recentLocations.forEach(loc => {
       const beginAt = new Date(loc.begin_at);
       const endAt = loc.end_at ? new Date(loc.end_at) : new Date();
       
-      for (let h = beginAt.getHours(); h <= endAt.getHours(); h++) {
-        if (h < 24) {
-          hourlyCount[h]++;
-        }
+      // Add student to each hour they were present
+      const startHour = beginAt.getHours();
+      const endHour = endAt.getHours();
+      
+      for (let h = startHour; h <= endHour && h < 24; h++) {
+        hourlyStudents[h].add(loc.login);
       }
     });
     
+    // Convert to average count
+    const hourlyCount = hourlyStudents.map(s => s.size);
     const maxOccupancy = Math.max(...hourlyCount, 1);
     const hourlyOccupancy = hourlyCount.map((count, hour) => ({
       hour: `${String(hour).padStart(2, '0')}:00`,
+      count,
       occupancy: Math.round((count / maxOccupancy) * 100)
     }));
     
-    // 9. Weekly Occupancy
-    const weeklyCount = { Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0 };
+    // 9. Weekly Occupancy (last 3 months average per day)
+    const dailyStudents = { Mon: new Set(), Tue: new Set(), Wed: new Set(), Thu: new Set(), Fri: new Set(), Sat: new Set(), Sun: new Set() };
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     
     recentLocations.forEach(loc => {
       const day = new Date(loc.begin_at).getDay();
-      weeklyCount[dayNames[day]]++;
+      dailyStudents[dayNames[day]].add(loc.login);
     });
     
-    const maxWeekly = Math.max(...Object.values(weeklyCount), 1);
+    const dailyCount = {
+      Mon: dailyStudents.Mon.size,
+      Tue: dailyStudents.Tue.size,
+      Wed: dailyStudents.Wed.size,
+      Thu: dailyStudents.Thu.size,
+      Fri: dailyStudents.Fri.size,
+      Sat: dailyStudents.Sat.size,
+      Sun: dailyStudents.Sun.size
+    };
+    
+    const maxWeekly = Math.max(...Object.values(dailyCount), 1);
     const weeklyOccupancy = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => ({
       day,
-      occupancy: Math.round((weeklyCount[day] / maxWeekly) * 100)
+      count: dailyCount[day],
+      occupancy: Math.round((dailyCount[day] / maxWeekly) * 100)
     }));
     
     res.json({
