@@ -222,9 +222,9 @@ router.get('/', async (req, res) => {
       }
     }));
     
-    // 7. Grade Distribution (use cached students)
+    // 7. Grade Distribution (use cached students, only active ones)
     console.log('All students found:', allStudentsCache.length);
-    const allStudents = allStudentsCache;
+    const allStudents = allStudentsCache.filter(s => s['active?'] === true);
     const gradeCount = {};
     allStudents.forEach(s => {
       const grade = s.grade || 'Unknown';

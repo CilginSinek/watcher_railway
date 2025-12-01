@@ -56,15 +56,19 @@ router.get('/pools', async (req, res) => {
     const poolCount = {};
     students.forEach(s => {
       if (s.pool_month && s.pool_year) {
-        const pool = `${s.pool_month}-${s.pool_year}`;
-        poolCount[pool] = (poolCount[pool] || 0) + 1;
+        const key = `${s.pool_month}-${s.pool_year}`;
+        poolCount[key] = (poolCount[key] || 0) + 1;
       }
     });
     
-    const pools = Object.entries(poolCount).map(([pool, count]) => ({
-      pool,
-      count
-    }));
+    const pools = Object.entries(poolCount).map(([key, count]) => {
+      const [month, year] = key.split('-');
+      return {
+        month,
+        year,
+        count
+      };
+    });
     
     res.json({ pools });
   } catch (error) {
