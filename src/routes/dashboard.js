@@ -153,8 +153,7 @@ router.get('/', async (req, res) => {
         
         return {
           login,
-          totalTime: `${hours}h ${minutes}m`,
-          totalMinutes, // Keep for sorting/reference
+          totalTime: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
           student: student ? {
             id: student.id,
             login: student.login,
