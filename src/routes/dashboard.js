@@ -9,6 +9,14 @@ const { validateCampusId } = require('../utils/validators');
  */
 router.get('/', async (req, res) => {
   try {
+    // Check if models are loaded
+    if (!Student || !Project || !LocationStats || !Feedback) {
+      return res.status(503).json({
+        error: 'Service Unavailable',
+        message: 'Database models not initialized. Please try again later.'
+      });
+    }
+
     // Validate and sanitize inputs
     let validatedCampusId = null;
     try {
@@ -29,11 +37,17 @@ router.get('/', async (req, res) => {
     
     // 1. Top Project Submitters (current month)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-    const projectsThisMonth = await Project.find({
-      ...campusFilter,
-      date: { $gte: monthStart },
-      "validated?": true
-    });
+    let projectsThisMonth = [];
+    try {
+      projectsThisMonth = await Project.find({
+        ...campusFilter,
+        date: { $gte: monthStart },
+        "validated?": true
+      });
+    } catch (dbError) {
+      console.error('Error fetching projects:', dbError);
+      projectsThisMonth = [];
+    }
     
     const projectsByStudent = {};
     projectsThisMonth.forEach(p => {
@@ -49,26 +63,42 @@ router.get('/', async (req, res) => {
         .sort((a, b) => b[1].count - a[1].count)
         .slice(0, 10)
         .map(async ([login, data]) => {
-          const student = await Student.findOne({ login });
-          return {
-            login,
-            projectCount: data.count,
-            totalScore: data.totalScore,
-            student: student ? {
-              id: student.id,
-              login: student.login,
-              displayname: student.displayname,
-              image: student.image
-            } : null
-          };
+          try {
+            const student = await Student.findOne({ login });
+            return {
+              login,
+              projectCount: data.count,
+              totalScore: data.totalScore,
+              student: student ? {
+                id: student.id,
+                login: student.login,
+                displayname: student.displayname,
+                image: student.image
+              } : null
+            };
+          } catch (err) {
+            console.error(`Error fetching student ${login}:`, err);
+            return {
+              login,
+              projectCount: data.count,
+              totalScore: data.totalScore,
+              student: null
+            };
+          }
         })
     );
     
     // 2. Top Location Stats (current month)
-    const locationsThisMonth = await LocationStats.find({
-      ...campusFilter,
-      begin_at: { $gte: monthStart }
-    });
+    let locationsThisMonth = [];
+    try {
+      locationsThisMonth = await LocationStats.find({
+        ...campusFilter,
+        begin_at: { $gte: monthStart }
+      });
+    } catch (dbError) {
+      console.error('Error fetching locations:', dbError);
+      locationsThisMonth = [];
+    }
     
     const timeByStudent = {};
     locationsThisMonth.forEach(loc => {
@@ -87,22 +117,33 @@ router.get('/', async (req, res) => {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10)
         .map(async ([login, totalTime]) => {
-          const student = await Student.findOne({ login });
-          return {
-            login,
-            totalTime,
-            student: student ? {
-              id: student.id,
-              login: student.login,
-              displayname: student.displayname,
-              image: student.image
-            } : null
-          };
+          try {
+            const student = await Student.findOne({ login });
+            return {
+              login,
+              totalTime,
+              student: student ? {
+                id: student.id,
+                login: student.login,
+                displayname: student.displayname,
+                image: student.image
+              } : null
+            };
+          } catch (err) {
+            console.error(`Error fetching student ${login}:`, err);
+            return { login, totalTime, student: null };
+          }
         })
     );
     
     // 3. All Time Projects
-    const allProjects = await Project.find({ ...campusFilter });
+    let allProjects = [];
+    try {
+      allProjects = await Project.find({ ...campusFilter });
+    } catch (dbError) {
+      console.error('Error fetching all projects:', dbError);
+      allProjects = [];
+    }
     const allProjectsByStudent = {};
     allProjects.forEach(p => {
       allProjectsByStudent[p.login] = (allProjectsByStudent[p.login] || 0) + 1;
@@ -113,24 +154,35 @@ router.get('/', async (req, res) => {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10)
         .map(async ([login, projectCount]) => {
-          const student = await Student.findOne({ login });
-          return {
-            login,
-            projectCount,
-            student: student ? {
-              id: student.id,
-              login: student.login,
-              displayname: student.displayname,
-              image: student.image
-            } : null
-          };
+          try {
+            const student = await Student.findOne({ login });
+            return {
+              login,
+              projectCount,
+              student: student ? {
+                id: student.id,
+                login: student.login,
+                displayname: student.displayname,
+                image: student.image
+              } : null
+            };
+          } catch (err) {
+            console.error(`Error fetching student ${login}:`, err);
+            return { login, projectCount, student: null };
+          }
         })
     );
     
     // 4. All Time Wallet
-    const allTimeWallet = await Student.find(campusFilter)
-      .sort({ wallet: -1 })
-      .limit(10);
+    let allTimeWallet = [];
+    try {
+      allTimeWallet = await Student.find(campusFilter)
+        .sort({ wallet: -1 })
+        .limit(10);
+    } catch (dbError) {
+      console.error('Error fetching wallet stats:', dbError);
+      allTimeWallet = [];
+    }
     
     const walletData = allTimeWallet.map(s => ({
       login: s.login,
@@ -144,9 +196,15 @@ router.get('/', async (req, res) => {
     }));
     
     // 5. All Time Correction Points
-    const allTimePoints = await Student.find(campusFilter)
-      .sort({ correction_point: -1 })
-      .limit(10);
+    let allTimePoints = [];
+    try {
+      allTimePoints = await Student.find(campusFilter)
+        .sort({ correction_point: -1 })
+        .limit(10);
+    } catch (dbError) {
+      console.error('Error fetching correction points:', dbError);
+      allTimePoints = [];
+    }
     
     const pointsData = allTimePoints.map(s => ({
       login: s.login,
@@ -160,9 +218,15 @@ router.get('/', async (req, res) => {
     }));
     
     // 6. All Time Levels
-    const allTimeLevels = await Student.find(campusFilter)
-      .sort({ level: -1 })
-      .limit(10);
+    let allTimeLevels = [];
+    try {
+      allTimeLevels = await Student.find(campusFilter)
+        .sort({ level: -1 })
+        .limit(10);
+    } catch (dbError) {
+      console.error('Error fetching levels:', dbError);
+      allTimeLevels = [];
+    }
     
     const levelsData = allTimeLevels.map(s => ({
       login: s.login,
@@ -176,7 +240,13 @@ router.get('/', async (req, res) => {
     }));
     
     // 7. Grade Distribution
-    const allStudents = await Student.find(campusFilter);
+    let allStudents = [];
+    try {
+      allStudents = await Student.find(campusFilter);
+    } catch (dbError) {
+      console.error('Error fetching students for grade distribution:', dbError);
+      allStudents = [];
+    }
     const gradeCount = {};
     allStudents.forEach(s => {
       const grade = s.grade || 'Unknown';
@@ -190,10 +260,16 @@ router.get('/', async (req, res) => {
     
     // 8. Hourly Occupancy (last 7 days average)
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const recentLocations = await LocationStats.find({
-      ...campusFilter,
-      begin_at: { $gte: sevenDaysAgo }
-    });
+    let recentLocations = [];
+    try {
+      recentLocations = await LocationStats.find({
+        ...campusFilter,
+        begin_at: { $gte: sevenDaysAgo }
+      });
+    } catch (dbError) {
+      console.error('Error fetching recent locations:', dbError);
+      recentLocations = [];
+    }
     
     const hourlyCount = Array(24).fill(0);
     const hourlyTotal = Array(24).fill(0);

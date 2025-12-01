@@ -1,6 +1,7 @@
 const { Ottoman } = require('ottoman');
 
-let ottoman;
+// Create Ottoman instance globally
+const ottoman = new Ottoman();
 
 /**
  * Initialize Ottoman connection
@@ -13,8 +14,8 @@ async function connect() {
     const bucketName = process.env.COUCHBASE_BUCKET || 'students';
 
     console.log('Connecting to Couchbase with Ottoman...');
-    
-    ottoman = new Ottoman();
+    console.log('Connection String:', connectionString);
+    console.log('Bucket:', bucketName);
     
     await ottoman.connect({
       connectionString: connectionString,
@@ -58,5 +59,6 @@ async function disconnect() {
 module.exports = {
   connect,
   getOttoman,
-  disconnect
+  disconnect,
+  ottoman
 };

@@ -1,4 +1,15 @@
-const { Schema, model } = require('ottoman');
+const { ottoman } = require('../config/database');
+const { Schema } = require('ottoman');
+
+// Helper to create models with ottoman instance
+const createModel = (name, schema, options) => {
+  try {
+    return ottoman.model(name, schema, options);
+  } catch (error) {
+    console.error(`Error creating model ${name}:`, error.message);
+    throw error;
+  }
+};
 
 // ---------------------------------------------------------
 // 1. STUDENT MODEL
@@ -61,7 +72,7 @@ const studentSchema = new Schema({
   }
 });
 
-const Student = model('Student', studentSchema, { 
+const Student = createModel('Student', studentSchema, { 
   collectionName: 'students',
   scopeName: '_default' 
 });
@@ -93,7 +104,7 @@ const projectSchema = new Schema({
   }
 });
 
-const Project = model('Project', projectSchema, { 
+const Project = createModel('Project', projectSchema, { 
   collectionName: 'projects',
   scopeName: '_default'
 });
@@ -118,7 +129,7 @@ const locationStatsSchema = new Schema({
   }
 });
 
-const LocationStats = model('LocationStats', locationStatsSchema, { 
+const LocationStats = createModel('LocationStats', locationStatsSchema, { 
   collectionName: 'locationstats',
   scopeName: '_default'
 });
@@ -142,7 +153,7 @@ const patronageSchema = new Schema({
   }
 });
 
-const Patronage = model('Patronage', patronageSchema, { 
+const Patronage = createModel('Patronage', patronageSchema, { 
   collectionName: 'patronages',
   scopeName: '_default'
 });
@@ -167,7 +178,7 @@ const feedbackSchema = new Schema({
   }
 });
 
-const Feedback = model('Feedback', feedbackSchema, { 
+const Feedback = createModel('Feedback', feedbackSchema, { 
   collectionName: 'feedbacks',
   scopeName: '_default'
 });

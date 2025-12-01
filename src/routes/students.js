@@ -20,6 +20,14 @@ const {
  */
 router.get('/pools', async (req, res) => {
   try {
+    // Check if models are loaded
+    if (!Student) {
+      return res.status(503).json({
+        error: 'Service Unavailable',
+        message: 'Database models not initialized'
+      });
+    }
+
     // Validate and sanitize inputs
     let validatedCampusId = null;
     try {
@@ -33,7 +41,16 @@ router.get('/pools', async (req, res) => {
     
     const filter = validatedCampusId !== null ? { campusId: validatedCampusId } : {};
     
-    const students = await Student.find(filter);
+    let students = [];
+    try {
+      students = await Student.find(filter);
+    } catch (dbError) {
+      console.error('Error fetching students for pools:', dbError);
+      return res.status(500).json({ 
+        error: 'Failed to fetch pools data',
+        message: 'Database query failed'
+      });
+    }
     
     const poolCount = {};
     students.forEach(s => {
@@ -64,6 +81,14 @@ router.get('/pools', async (req, res) => {
  */
 router.get('/:login', async (req, res) => {
   try {
+    // Check if models are loaded
+    if (!Student || !Project || !LocationStats || !Feedback || !Patronage) {
+      return res.status(503).json({
+        error: 'Service Unavailable',
+        message: 'Database models not initialized'
+      });
+    }
+
     // Validate and sanitize login
     let validatedLogin;
     try {
@@ -85,7 +110,13 @@ router.get('/:login', async (req, res) => {
     }
     
     // Get projects
-    const projects = await Project.find({ login: validatedLogin });
+    let projects = [];
+    try {
+      projects = await Project.find({ login: validatedLogin });
+    } catch (dbError) {
+      console.error('Error fetching projects:', dbError);
+      projects = [];
+    }
     const projectsData = projects.map(p => ({
       id: p.id,
       name: p.name,
@@ -99,7 +130,13 @@ router.get('/:login', async (req, res) => {
     }));
     
     // Get location stats
-    const locationStats = await LocationStats.find({ login: validatedLogin });
+    let locationStats = [];
+    try {
+      locationStats = await LocationStats.find({ login: validatedLogin });
+    } catch (dbError) {
+      console.error('Error fetching location stats:', dbError);
+      locationStats = [];
+    }
     const locationData = locationStats.map(l => ({
       id: l.id,
       login: l.login,
@@ -110,7 +147,13 @@ router.get('/:login', async (req, res) => {
     }));
     
     // Get feedbacks
-    const feedbacks = await Feedback.find({ login: validatedLogin });
+    let feedbacks = [];
+    try {
+      feedbacks = await Feedback.find({ login: validatedLogin });
+    } catch (dbError) {
+      console.error('Error fetching feedbacks:', dbError);
+      feedbacks = [];
+    }
     const feedbacksData = feedbacks.map(f => ({
       id: f.id,
       login: f.login,
@@ -122,32 +165,49 @@ router.get('/:login', async (req, res) => {
     }));
     
     // Get patronage (as patron)
-    const asPatron = await Patronage.find({ godfather_login: validatedLogin });
-    const patroned = await Promise.all(
-      asPatron.map(async (p) => {
-        const patronedStudent = await Student.findOne({ login: p.user_login });
-        return patronedStudent ? {
-          id: patronedStudent.id,
-          login: patronedStudent.login,
-          displayname: patronedStudent.displayname,
-          image: patronedStudent.image
-        } : null;
-      })
-    );
+    let asPatron = [];
+    let patroned = [];
+    try {
+      asPatron = await Patronage.find({ godfather_login: validatedLogin });
+      patroned = await Promise.all(
+        asPatron.map(async (p) => {
+          try {
+            const patronedStudent = await Student.findOne({ login: p.user_login });
+            return patronedStudent ? {
+              id: patronedStudent.id,
+              login: patronedStudent.login,
+              displayname: patronedStudent.displayname,
+              image: patronedStudent.image
+            } : null;
+          } catch (err) {
+            console.error(`Error fetching patroned student ${p.user_login}:`, err);
+            return null;
+          }
+        })
+      );
+    } catch (dbError) {
+      console.error('Error fetching patronage:', dbError);
+      patroned = [];
+    }
     
     // Get patronage (as patroned)
-    const asPatroned = await Patronage.findOne({ user_login: validatedLogin });
     let patron = null;
-    if (asPatroned) {
-      const patronStudent = await Student.findOne({ login: asPatroned.godfather_login });
-      if (patronStudent) {
-        patron = {
-          id: patronStudent.id,
-          login: patronStudent.login,
-          displayname: patronStudent.displayname,
-          image: patronStudent.image
-        };
+    try {
+      const asPatroned = await Patronage.findOne({ user_login: validatedLogin });
+      if (asPatroned) {
+        const patronStudent = await Student.findOne({ login: asPatroned.godfather_login });
+        if (patronStudent) {
+          patron = {
+            id: patronStudent.id,
+            login: patronStudent.login,
+            displayname: patronStudent.displayname,
+            image: patronStudent.image
+          };
+        }
       }
+    } catch (dbError) {
+      console.error('Error fetching patron:', dbError);
+      patron = null;
     }
     
     res.json({
@@ -192,6 +252,14 @@ router.get('/:login', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
+    // Check if models are loaded
+    if (!Student) {
+      return res.status(503).json({
+        error: 'Service Unavailable',
+        message: 'Database models not initialized'
+      });
+    }
+
     // Validate and sanitize all inputs
     let validatedCampusId, validatedSearch, validatedPool, validatedGrade, validatedActive;
     let validatedSort, validatedOrder, validatedLimit, validatedSkip;
@@ -234,7 +302,16 @@ router.get('/', async (req, res) => {
     }
     
     // Get total count
-    const allStudents = await Student.find(filter);
+    let allStudents = [];
+    try {
+      allStudents = await Student.find(filter);
+    } catch (dbError) {
+      console.error('Error fetching students:', dbError);
+      return res.status(500).json({ 
+        error: 'Failed to fetch students',
+        message: 'Database query failed'
+      });
+    }
     
     // Apply search filter if needed (already sanitized)
     let filteredStudents = allStudents;
