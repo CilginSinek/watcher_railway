@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { Student, Project, LocationStats, Feedback, Patronage } = require('../models');
+const { getDefaultInstance } = require('ottoman');
 const {
   validateCampusId,
   validateLogin,
@@ -21,7 +22,6 @@ const {
  */
 router.get('/pools', async (req, res) => {
   try {
-    // Check if models are loaded
     if (!Student) {
       return res.status(503).json({
         error: 'Service Unavailable',
@@ -29,7 +29,6 @@ router.get('/pools', async (req, res) => {
       });
     }
 
-    // Validate and sanitize inputs
     let validatedCampusId = null;
     try {
       validatedCampusId = validateCampusId(req.query.campusId);
@@ -41,18 +40,8 @@ router.get('/pools', async (req, res) => {
     }
     
     const filter = validatedCampusId !== null ? { campusId: validatedCampusId } : {};
-    
-    let students = [];
-    try {
-      const result = await Student.find(filter);
-      students = result?.rows || [];
-    } catch (dbError) {
-      console.error('Error fetching students for pools:', dbError.message);
-      return res.status(500).json({ 
-        error: 'Failed to fetch pools data',
-        message: 'Database query failed'
-      });
-    }
+    const result = await Student.find(filter);
+    const students = result?.rows || [];
     
     const poolCount = {};
     students.forEach(s => {
@@ -64,20 +53,13 @@ router.get('/pools', async (req, res) => {
     
     const pools = Object.entries(poolCount).map(([key, count]) => {
       const [month, year] = key.split('-');
-      return {
-        month,
-        year,
-        count
-      };
+      return { month, year, count };
     });
     
     res.json({ pools });
   } catch (error) {
     console.error('Pools fetch error:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch pools data',
-      message: error.message
-    });
+    res.status(500).json({ error: 'Failed to fetch pools data', message: error.message });
   }
 });
 
@@ -87,7 +69,6 @@ router.get('/pools', async (req, res) => {
  */
 router.get('/:login', async (req, res) => {
   try {
-    // Check if models are loaded
     if (!Student || !Project || !LocationStats || !Feedback || !Patronage) {
       return res.status(503).json({
         error: 'Service Unavailable',
@@ -95,7 +76,6 @@ router.get('/:login', async (req, res) => {
       });
     }
 
-    // Validate and sanitize login
     let validatedLogin;
     try {
       validatedLogin = validateLogin(req.params.login);
@@ -106,71 +86,47 @@ router.get('/:login', async (req, res) => {
       });
     }
     
-    // Get student
     const student = await Student.findOne({ login: validatedLogin });
-    
     if (!student) {
-      return res.status(404).json({ 
-        error: 'Student not found' 
-      });
+      return res.status(404).json({ error: 'Student not found' });
     }
     
     // Get projects
-    let projects = [];
-    try {
-      const result = await Project.find({ login: validatedLogin });
-      projects = result?.rows || [];
-    } catch (dbError) {
-      console.error('Error fetching projects:', dbError.message);
-      projects = [];
-    }
+    const projectsResult = await Project.find({ login: validatedLogin });
+    const projects = projectsResult?.rows || [];
     const projectsData = projects.map(p => ({
-      project: p.project, // DB uses 'project' field
+      project: p.project,
       login: p.login,
-      score: p.score, // DB uses 'score' not 'final_mark'
+      score: p.score,
       status: p.status,
       date: p.date,
       campusId: p.campusId
     }));
     
     // Get location stats
-    let locationData = null;
-    try {
-      const result = await LocationStats.find({ login: validatedLogin });
-      const locationStats = result?.rows || [];
-      console.log(`LocationStats for ${validatedLogin}:`, locationStats.length, 'found');
-      
-      if (locationStats.length > 0) {
-        locationData = locationStats[0];
-        console.log('Location data found with', Object.keys(locationData.months || {}).length, 'months');
-      }
-    } catch (dbError) {
-      console.error('Error fetching location stats:', dbError.message);
-      locationData = null;
-    }
+    const locationResult = await LocationStats.find({ login: validatedLogin });
+    const locationStats = locationResult?.rows || [];
+    const locationData = locationStats.length > 0 ? locationStats[0] : null;
     
-    // Parse logTimes and attendanceDays from locationData
+    // Parse logTimes and attendanceDays
     let logTimes = [];
     const dayAttendance = { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] };
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     
-    if (locationData && locationData.months) {
+    if (locationData?.months) {
       Object.entries(locationData.months).forEach(([monthKey, monthData]) => {
         if (monthData.days) {
           Object.entries(monthData.days).forEach(([day, durationStr]) => {
             if (durationStr && durationStr !== "00:00:00") {
-              // Parse duration string "HH:MM:SS" to minutes
               const parts = durationStr.split(':');
               const hours = parseInt(parts[0]) || 0;
               const minutes = parseInt(parts[1]) || 0;
               const seconds = parseInt(parts[2]) || 0;
               const totalMinutes = hours * 60 + minutes + Math.floor(seconds / 60);
               
-              // Create date from month-day
               const date = `${monthKey}-${day.padStart(2, '0')}`;
               logTimes.push({ date, duration: totalMinutes });
               
-              // Calculate day of week for attendance
               const fullDate = new Date(`${monthKey}-${day.padStart(2, '0')}`);
               if (!isNaN(fullDate.getTime())) {
                 const dayOfWeek = dayNames[fullDate.getDay()];
@@ -184,23 +140,14 @@ router.get('/:login', async (req, res) => {
       });
     }
     
-    // Get feedbacks and calculate averages
-    let feedbacks = [];
-    try {
-      const result = await Feedback.find({ login: validatedLogin });
-      feedbacks = result?.rows || [];
-    } catch (dbError) {
-      console.error('Error fetching feedbacks:', dbError.message);
-      feedbacks = [];
-    }
-    
-    // Calculate feedback averages
+    // Get feedbacks
+    const feedbacksResult = await Feedback.find({ login: validatedLogin });
+    const feedbacks = feedbacksResult?.rows || [];
     const feedbackCount = feedbacks.length;
     const avgRating = feedbackCount > 0 
       ? feedbacks.reduce((sum, f) => sum + (f.rating || 0), 0) / feedbackCount 
       : 0;
     
-    // Calculate attendanceDays from parsed data
     const attendanceDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => ({
       day,
       avgHours: dayAttendance[day].length > 0 
@@ -208,56 +155,39 @@ router.get('/:login', async (req, res) => {
         : 0
     }));
     
-    // Get patronage (single document with login)
-    let children = [];
-    let godfathers = [];
-    try {
-      const result = await Patronage.find({ login: validatedLogin });
-      const patronageData = result?.rows || [];
-      console.log(`Patronage for ${validatedLogin}:`, patronageData.length, 'found');
-      if (patronageData.length > 0) {
-        console.log('Patronage data:', JSON.stringify(patronageData[0]));
-        // DB structure has godfathers and children arrays directly
-        children = patronageData[0].children || [];
-        godfathers = patronageData[0].godfathers || [];
-      }
-    } catch (dbError) {
-      console.error('Error fetching patronage:', dbError.message);
-      children = [];
-      godfathers = [];
-    }
+    // Get patronage
+    const patronageResult = await Patronage.find({ login: validatedLogin });
+    const patronageData = patronageResult?.rows || [];
+    const children = patronageData.length > 0 ? patronageData[0].children || [] : [];
+    const godfathers = patronageData.length > 0 ? patronageData[0].godfathers || [] : [];
     
-    res.json({student: {
-      id: student.id,
-      login: student.login,
-      displayname: student.displayname,
-      email: student.email,
-      image: student.image,
-      correction_point: student.correction_point,
-      wallet: student.wallet,
-      location: student.location,
-      'active?': student['active?'],
-      'alumni?': student['alumni?'],
-      is_piscine: student.is_piscine,
-      is_trans: student.is_trans,
-      grade: student.grade,
-      project_count: projects.length,
-      projects: projectsData,
-      patronage: {
-        godfathers,
-        children
-      },
-      feedbackCount,
-      avgRating: Math.round(avgRating * 100) / 100,
-      logTimes,
-      attendanceDays
-    }});
+    res.json({
+      student: {
+        id: student.id,
+        login: student.login,
+        displayname: student.displayname,
+        email: student.email,
+        image: student.image,
+        correction_point: student.correction_point,
+        wallet: student.wallet,
+        location: student.location,
+        'active?': student['active?'],
+        'alumni?': student['alumni?'],
+        is_piscine: student.is_piscine,
+        is_trans: student.is_trans,
+        grade: student.grade,
+        project_count: projects.length,
+        projects: projectsData,
+        patronage: { godfathers, children },
+        feedbackCount,
+        avgRating: Math.round(avgRating * 100) / 100,
+        logTimes,
+        attendanceDays
+      }
+    });
   } catch (error) {
     console.error('Student fetch error:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch student',
-      message: error.message
-    });
+    res.status(500).json({ error: 'Failed to fetch student', message: error.message });
   }
 });
 
@@ -267,15 +197,11 @@ router.get('/:login', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
-    // Check if models are loaded
     if (!Student) {
-      return res.status(503).json({
-        error: 'Service Unavailable',
-        message: 'Database models not initialized'
-      });
+      return res.status(503).json({ error: 'Service Unavailable', message: 'Database models not initialized' });
     }
 
-    // Validate and sanitize all inputs
+    // Validate inputs
     let validatedCampusId, validatedSearch, validatedPool, validatedGrade, validatedStatus;
     let validatedSort, validatedOrder, validatedLimit, validatedSkip;
     
@@ -287,32 +213,22 @@ router.get('/', async (req, res) => {
       validatedStatus = validateStatus(req.query.status);
       validatedSort = validateSort(req.query.sort);
       validatedOrder = validateOrder(req.query.order);
-      validatedLimit = validateLimit(req.query.limit);
+      validatedLimit = Math.min(validateLimit(req.query.limit), 50); // Max 50 per page
       validatedSkip = validateSkip(req.query.skip);
     } catch (validationError) {
-      return res.status(400).json({
-        error: 'Bad Request',
-        message: validationError.message
-      });
+      return res.status(400).json({ error: 'Bad Request', message: validationError.message });
     }
     
-    // Build filter based on status
+    // Build filter
     const filter = {};
-    
-    if (validatedCampusId !== null) {
-      filter.campusId = validatedCampusId;
-    }
-    
+    if (validatedCampusId !== null) filter.campusId = validatedCampusId;
     if (validatedPool) {
       filter.pool_month = validatedPool.month;
       filter.pool_year = validatedPool.year;
     }
+    if (validatedGrade) filter.grade = validatedGrade;
     
-    if (validatedGrade) {
-      filter.grade = validatedGrade;
-    }
-    
-    // Status-based filters
+    // Status filters
     if (validatedStatus) {
       switch (validatedStatus) {
         case 'active':
@@ -355,308 +271,179 @@ router.get('/', async (req, res) => {
       }
     }
     
-    // Get total count
-    let allStudents = [];
-    try {
-      const result = await Student.find(filter);
-      allStudents = result?.rows || [];
-    } catch (dbError) {
-      console.error('Error fetching students:', dbError.message);
-      return res.status(500).json({ 
-        error: 'Failed to fetch students',
-        message: 'Database query failed'
-      });
-    }
+    // Get students
+    const result = await Student.find(filter);
+    let allStudents = result?.rows || [];
     
-    // Apply search filter first to reduce dataset
-    let filteredStudents = allStudents;
+    // Search filter
     if (validatedSearch) {
       const searchLower = validatedSearch.toLowerCase();
-      filteredStudents = allStudents.filter(s => 
+      allStudents = allStudents.filter(s => 
         s.login?.toLowerCase().includes(searchLower) ||
         s.first_name?.toLowerCase().includes(searchLower) ||
-        s.last_name?.toLowerCase().includes(searchLower) ||
-        s.displayname?.toLowerCase().includes(searchLower)
+        s.last_name?.toLowerCase().includes(searchLower)
       );
     }
     
-    const total = filteredStudents.length;
+    const total = allStudents.length;
     
-    // Sort in-memory by basic fields (much faster than DB sort)
+    // Check if sorting by calculated field
     const isCalculatedField = [
       'project_count', 'cheat_count', 'godfather_count', 
       'children_count', 'log_time', 'evo_performance', 
       'feedback_count', 'avg_rating'
     ].includes(validatedSort);
     
-    let enrichedStudents = filteredStudents;
-    
-    // If sorting by calculated field, we MUST enrich ALL filtered students before pagination
+    // Use N1QL for calculated fields
     if (isCalculatedField) {
-      const allLogins = filteredStudents.map(s => s.login);
-      const projectsByLogin = {};
-      const feedbacksByLogin = {};
-      const patronageByLogin = {};
-      const locationByLogin = {};
-      
       try {
-        // Fetch data in batches to avoid timeout
-        const batchSize = 20;
+        const ottoman = getDefaultInstance();
+        const cluster = ottoman.cluster;
         
-        for (let i = 0; i < allLogins.length; i += batchSize) {
-          const batch = allLogins.slice(i, i + batchSize);
-          
-          const [projectsResults, feedbacksResults, patronageResults, locationResults] = await Promise.all([
-            Promise.all(batch.map(login => 
-              Project.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-                .catch(err => ({ rows: [] }))
-            )),
-            Promise.all(batch.map(login => 
-              Feedback.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-                .catch(err => ({ rows: [] }))
-            )),
-            Promise.all(batch.map(login => 
-              Patronage.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-                .catch(err => ({ rows: [] }))
-            )),
-            Promise.all(batch.map(login => 
-              LocationStats.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-                .catch(err => ({ rows: [] }))
-            ))
-          ]);
-          
-          batch.forEach((login, idx) => {
-            projectsByLogin[login] = projectsResults[idx]?.rows || [];
-            feedbacksByLogin[login] = feedbacksResults[idx]?.rows || [];
-            patronageByLogin[login] = (patronageResults[idx]?.rows || [])[0];
-            locationByLogin[login] = (locationResults[idx]?.rows || [])[0];
+        // Get only logins for current page (max 50)
+        const pageStart = validatedSkip;
+        const pageEnd = Math.min(validatedSkip + validatedLimit, total);
+        const pageLogins = allStudents.slice(pageStart, pageEnd).map(s => s.login);
+        
+        if (pageLogins.length === 0) {
+          return res.json({
+            students: [],
+            pagination: { total: 0, page: 1, limit: validatedLimit, totalPages: 0 }
           });
         }
         
-        // Enrich ALL students with calculated data
-        enrichedStudents = filteredStudents.map((s) => {
-          const projects = projectsByLogin[s.login] || [];
-          const feedbacks = feedbacksByLogin[s.login] || [];
-          const patronage = patronageByLogin[s.login];
-          const location = locationByLogin[s.login];
-          
-          const project_count = projects.length;
-          const cheat_count = projects.filter(p => p.score === -42).length;
-          const feedback_count = feedbacks.length;
-          const avg_rating = feedback_count > 0 
-            ? feedbacks.reduce((sum, f) => sum + (f.rating || 0), 0) / feedback_count 
-            : 0;
-          
-          const godfather_count = patronage?.godfathers?.length || 0;
-          const children_count = patronage?.children?.length || 0;
-          
-          let log_time = 0;
-          if (location?.months) {
-            const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-            Object.entries(location.months).forEach(([monthKey, monthData]) => {
-              const monthDate = new Date(monthKey + '-01');
-              if (monthDate >= threeMonthsAgo && monthData.days) {
-                Object.values(monthData.days).forEach(durationStr => {
-                  if (durationStr && durationStr !== "00:00:00") {
-                    const [hours = 0, minutes = 0] = durationStr.split(':').map(Number);
-                    log_time += hours * 60 + minutes;
-                  }
-                });
-              }
-            });
-          }
-          
-          const evo_performance = (project_count * 10) + (avg_rating * 5) - (cheat_count * 20);
-          
-          return {
-            ...s,
-            project_count,
-            cheat_count,
-            feedback_count,
-            avg_rating,
-            godfather_count,
-            children_count,
-            log_time,
-            evo_performance
-          };
-        });
-      } catch (dbError) {
-        console.error('Error fetching calculated field data:', dbError.message);
-      }
-      
-      // Sort by calculated field
-      enrichedStudents.sort((a, b) => {
-        let aVal = a[validatedSort] || 0;
-        let bVal = b[validatedSort] || 0;
-        return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
-      });
-    } else {
-      // Sort by basic field BEFORE pagination
-      enrichedStudents.sort((a, b) => {
-        let aVal = a[validatedSort];
-        let bVal = b[validatedSort];
+        const loginList = pageLogins.map(l => `"${l}"`).join(',');
+        const campusFilter = validatedCampusId !== null ? `AND campusId = ${validatedCampusId}` : '';
         
-        if (aVal === null || aVal === undefined) aVal = typeof bVal === 'number' ? -Infinity : '';
-        if (bVal === null || bVal === undefined) bVal = typeof aVal === 'number' ? -Infinity : '';
+        // N1QL query with subqueries
+        const n1qlQuery = `
+          SELECT s.*,
+            (SELECT COUNT(*) FROM product._default.projects p WHERE p.login = s.login ${campusFilter} AND p.type = 'Project')[0] as project_count,
+            (SELECT COUNT(*) FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 ${campusFilter} AND p.type = 'Project')[0] as cheat_count,
+            (SELECT COUNT(*) FROM product._default.feedbacks f WHERE f.login = s.login ${campusFilter} AND f.type = 'Feedback')[0] as feedback_count,
+            (SELECT AVG(f.rating) FROM product._default.feedbacks f WHERE f.login = s.login ${campusFilter} AND f.type = 'Feedback')[0] as avg_rating,
+            (SELECT VALUE LENGTH(pt.godfathers) FROM product._default.patronages pt WHERE pt.login = s.login ${campusFilter} AND pt.type = 'Patronage' LIMIT 1)[0] as godfather_count,
+            (SELECT VALUE LENGTH(pt.children) FROM product._default.patronages pt WHERE pt.login = s.login ${campusFilter} AND pt.type = 'Patronage' LIMIT 1)[0] as children_count
+          FROM product._default.students s
+          WHERE s.type = 'Student' AND s.login IN [${loginList}] ${campusFilter}
+        `;
         
-        if (typeof aVal === 'string') {
-          aVal = aVal.toLowerCase();
-          bVal = (bVal || '').toString().toLowerCase();
-        }
+        const queryResult = await cluster.query(n1qlQuery);
+        let students = (queryResult.rows || []).map(s => ({
+          ...s,
+          project_count: s.project_count || 0,
+          cheat_count: s.cheat_count || 0,
+          feedback_count: s.feedback_count || 0,
+          avg_rating: s.avg_rating || 0,
+          godfather_count: s.godfather_count || 0,
+          children_count: s.children_count || 0,
+          log_time: 0,
+          evo_performance: ((s.project_count || 0) * 10) + ((s.avg_rating || 0) * 5) - ((s.cheat_count || 0) * 20)
+        }));
         
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
+        // Sort
+        students.sort((a, b) => {
+          const aVal = a[validatedSort] || 0;
+          const bVal = b[validatedSort] || 0;
           return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
-        }
+        });
         
-        return validatedOrder === 'asc' ? (aVal > bVal ? 1 : -1) : (aVal < bVal ? 1 : -1);
-      });
-    }
-    
-    // NOW paginate after sorting
-    const paginatedStudents = enrichedStudents.slice(validatedSkip, validatedSkip + validatedLimit);
-    
-    // For non-calculated fields, enrich only the paginated students
-    let finalStudents = paginatedStudents;
-    
-    if (!isCalculatedField) {
-      const studentLogins = paginatedStudents.map(s => s.login);
-      const projectsByLogin = {};
-      const feedbacksByLogin = {};
-      const patronageByLogin = {};
-      const locationByLogin = {};
-      
-      if (studentLogins.length > 0) {
-        try {
-          const batchSize = 20;
-          
-          for (let i = 0; i < studentLogins.length; i += batchSize) {
-            const batch = studentLogins.slice(i, i + batchSize);
-            
-            const [projectsResults, feedbacksResults, patronageResults, locationResults] = await Promise.all([
-              Promise.all(batch.map(login => 
-                Project.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-                  .catch(err => ({ rows: [] }))
-              )),
-              Promise.all(batch.map(login => 
-                Feedback.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-                  .catch(err => ({ rows: [] }))
-              )),
-              Promise.all(batch.map(login => 
-                Patronage.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-                  .catch(err => ({ rows: [] }))
-              )),
-              Promise.all(batch.map(login => 
-                LocationStats.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-                  .catch(err => ({ rows: [] }))
-              ))
-            ]);
-            
-            batch.forEach((login, idx) => {
-              projectsByLogin[login] = projectsResults[idx]?.rows || [];
-              feedbacksByLogin[login] = feedbacksResults[idx]?.rows || [];
-              patronageByLogin[login] = (patronageResults[idx]?.rows || [])[0];
-              locationByLogin[login] = (locationResults[idx]?.rows || [])[0];
-            });
+        // Map response
+        students = students.map(s => ({
+          id: s.id,
+          login: s.login,
+          email: s.email,
+          first_name: s.first_name,
+          last_name: s.last_name,
+          displayname: s.displayname,
+          usual_full_name: s.usual_full_name,
+          pool_month: s.pool_month,
+          pool_year: s.pool_year,
+          wallet: s.wallet,
+          correction_point: s.correction_point,
+          level: s.level,
+          "active?": s["active?"],
+          grade: s.grade,
+          campusId: s.campusId,
+          image: s.image,
+          ...(s.project_count > 0 && { project_count: s.project_count }),
+          ...(s.cheat_count > 0 && { cheat_count: s.cheat_count }),
+          ...(s.feedback_count > 0 && { feedback_count: s.feedback_count }),
+          ...(s.avg_rating > 0 && { avg_rating: Math.round(s.avg_rating * 100) / 100 }),
+          ...(s.godfather_count > 0 && { godfather_count: s.godfather_count }),
+          ...(s.children_count > 0 && { children_count: s.children_count }),
+          ...(s.log_time > 0 && { log_time: s.log_time }),
+          ...(s.evo_performance !== 0 && { evo_performance: Math.round(s.evo_performance * 100) / 100 })
+        }));
+        
+        return res.json({
+          students,
+          pagination: {
+            total,
+            page: Math.floor(validatedSkip / validatedLimit) + 1,
+            limit: validatedLimit,
+            totalPages: Math.ceil(total / validatedLimit)
           }
-          
-          finalStudents = paginatedStudents.map((s) => {
-            const projects = projectsByLogin[s.login] || [];
-            const feedbacks = feedbacksByLogin[s.login] || [];
-            const patronage = patronageByLogin[s.login];
-            const location = locationByLogin[s.login];
-            
-            const project_count = projects.length;
-            const cheat_count = projects.filter(p => p.score === -42).length;
-            const feedback_count = feedbacks.length;
-            const avg_rating = feedback_count > 0 
-              ? feedbacks.reduce((sum, f) => sum + (f.rating || 0), 0) / feedback_count 
-              : 0;
-            
-            const godfather_count = patronage?.godfathers?.length || 0;
-            const children_count = patronage?.children?.length || 0;
-            
-            let log_time = 0;
-            if (location?.months) {
-              const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-              Object.entries(location.months).forEach(([monthKey, monthData]) => {
-                const monthDate = new Date(monthKey + '-01');
-                if (monthDate >= threeMonthsAgo && monthData.days) {
-                  Object.values(monthData.days).forEach(durationStr => {
-                    if (durationStr && durationStr !== "00:00:00") {
-                      const [hours = 0, minutes = 0] = durationStr.split(':').map(Number);
-                      log_time += hours * 60 + minutes;
-                    }
-                  });
-                }
-              });
-            }
-            
-            const evo_performance = (project_count * 10) + (avg_rating * 5) - (cheat_count * 20);
-            
-            return {
-              ...s,
-              project_count,
-              cheat_count,
-              feedback_count,
-              avg_rating,
-              godfather_count,
-              children_count,
-              log_time,
-              evo_performance
-            };
-          });
-        } catch (dbError) {
-          console.error('Error fetching enrichment data:', dbError.message);
-        }
+        });
+      } catch (n1qlError) {
+        console.error('N1QL error:', n1qlError);
+        return res.status(500).json({ error: 'Database query failed', message: n1qlError.message });
       }
     }
     
-    // Map to response format
-    const students = finalStudents.map(s => ({
-        id: s.id,
-        login: s.login,
-        email: s.email,
-        first_name: s.first_name,
-        last_name: s.last_name,
-        displayname: s.displayname,
-        usual_full_name: s.usual_full_name,
-        pool_month: s.pool_month,
-        pool_year: s.pool_year,
-        wallet: s.wallet,
-        correction_point: s.correction_point,
-        level: s.level,
-        "active?": s["active?"],
-        grade: s.grade,
-        campusId: s.campusId,
-        image: s.image,
-        ...(s.project_count > 0 && { project_count: s.project_count }),
-        ...(s.cheat_count > 0 && { cheat_count: s.cheat_count }),
-        ...(s.feedback_count > 0 && { feedback_count: s.feedback_count }),
-        ...(s.avg_rating > 0 && { avg_rating: Math.round(s.avg_rating * 100) / 100 }),
-        ...(s.godfather_count > 0 && { godfather_count: s.godfather_count }),
-        ...(s.children_count > 0 && { children_count: s.children_count }),
-        ...(s.log_time > 0 && { log_time: s.log_time }),
-        ...(s.evo_performance !== 0 && { evo_performance: Math.round(s.evo_performance * 100) / 100 })
-      }));
+    // For normal fields, sort and paginate
+    allStudents.sort((a, b) => {
+      let aVal = a[validatedSort];
+      let bVal = b[validatedSort];
+      
+      if (aVal === null || aVal === undefined) aVal = typeof bVal === 'number' ? -Infinity : '';
+      if (bVal === null || bVal === undefined) bVal = typeof aVal === 'number' ? -Infinity : '';
+      
+      if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase();
+        bVal = (bVal || '').toString().toLowerCase();
+      }
+      
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      
+      return validatedOrder === 'asc' ? (aVal > bVal ? 1 : -1) : (aVal < bVal ? 1 : -1);
+    });
     
-    const totalPages = Math.ceil(total / validatedLimit);
-    const currentPage = Math.floor(validatedSkip / validatedLimit) + 1;
+    const paginatedStudents = allStudents.slice(validatedSkip, validatedSkip + validatedLimit);
+    
+    const students = paginatedStudents.map(s => ({
+      id: s.id,
+      login: s.login,
+      email: s.email,
+      first_name: s.first_name,
+      last_name: s.last_name,
+      displayname: s.displayname,
+      usual_full_name: s.usual_full_name,
+      pool_month: s.pool_month,
+      pool_year: s.pool_year,
+      wallet: s.wallet,
+      correction_point: s.correction_point,
+      level: s.level,
+      "active?": s["active?"],
+      grade: s.grade,
+      campusId: s.campusId,
+      image: s.image
+    }));
     
     res.json({
       students,
       pagination: {
         total,
-        page: currentPage,
+        page: Math.floor(validatedSkip / validatedLimit) + 1,
         limit: validatedLimit,
-        totalPages
+        totalPages: Math.ceil(total / validatedLimit)
       }
     });
   } catch (error) {
     console.error('Students list error:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch students',
-      message: error.message
-    });
+    res.status(500).json({ error: 'Failed to fetch students', message: error.message });
   }
 });
 
