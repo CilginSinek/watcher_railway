@@ -139,7 +139,14 @@ router.get('/:login', async (req, res) => {
       locationStats = result?.rows || [];
       console.log(`LocationStats for ${validatedLogin}:`, locationStats.length, 'found');
       if (locationStats.length > 0) {
-        console.log('First location sample:', JSON.stringify(locationStats[0]));
+        console.log('First location sample:', JSON.stringify(locationStats[0]).substring(0, 200));
+      } else {
+        console.log('No locations found, checking all locations count...');
+        const allResult = await LocationStats.find({});
+        console.log('Total locations in DB:', allResult?.rows?.length || 0);
+        if (allResult?.rows?.length > 0) {
+          console.log('Sample location structure:', JSON.stringify(allResult.rows[0]).substring(0, 300));
+        }
       }
     } catch (dbError) {
       console.error('Error fetching location stats:', dbError.message);
@@ -212,33 +219,22 @@ router.get('/:login', async (req, res) => {
         : 0
     }));
     
-    // Get patronage (as patron - children)
+    // Get patronage (single document with login)
     let children = [];
-    try {
-      const result = await Patronage.find({ godfather_login: validatedLogin });
-      const asPatron = result?.rows || [];
-      console.log(`Patronage children for ${validatedLogin}:`, asPatron.length, 'found');
-      if (asPatron.length > 0) {
-        console.log('First patronage sample:', JSON.stringify(asPatron[0]));
-      }
-      children = asPatron.map(p => ({ login: p.user_login }));
-    } catch (dbError) {
-      console.error('Error fetching patronage children:', dbError.message);
-      children = [];
-    }
-    
-    // Get patronage (as patroned - godfathers)
     let godfathers = [];
     try {
-      const result = await Patronage.find({ user_login: validatedLogin });
-      const asPatroned = result?.rows || [];
-      console.log(`Patronage godfathers for ${validatedLogin}:`, asPatroned.length, 'found');
-      if (asPatroned.length > 0) {
-        console.log('First godfather sample:', JSON.stringify(asPatroned[0]));
+      const result = await Patronage.find({ login: validatedLogin });
+      const patronageData = result?.rows || [];
+      console.log(`Patronage for ${validatedLogin}:`, patronageData.length, 'found');
+      if (patronageData.length > 0) {
+        console.log('Patronage data:', JSON.stringify(patronageData[0]));
+        // DB structure has godfathers and children arrays directly
+        children = patronageData[0].children || [];
+        godfathers = patronageData[0].godfathers || [];
       }
-      godfathers = asPatroned.map(p => ({ login: p.godfather_login }));
     } catch (dbError) {
-      console.error('Error fetching patronage godfathers:', dbError.message);
+      console.error('Error fetching patronage:', dbError.message);
+      children = [];
       godfathers = [];
     }
     
