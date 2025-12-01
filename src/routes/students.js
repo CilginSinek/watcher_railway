@@ -11,7 +11,8 @@ const {
   validateOrder,
   validateLimit,
   validateSkip,
-  validateActive
+  validateActive,
+  validateStatus
 } = require('../utils/validators');
 
 /**
@@ -275,7 +276,7 @@ router.get('/', async (req, res) => {
     }
 
     // Validate and sanitize all inputs
-    let validatedCampusId, validatedSearch, validatedPool, validatedGrade, validatedActive;
+    let validatedCampusId, validatedSearch, validatedPool, validatedGrade, validatedStatus;
     let validatedSort, validatedOrder, validatedLimit, validatedSkip;
     
     try {
@@ -283,7 +284,7 @@ router.get('/', async (req, res) => {
       validatedSearch = validateSearch(req.query.search);
       validatedPool = validatePool(req.query.pool);
       validatedGrade = validateGrade(req.query.grade);
-      validatedActive = validateActive(req.query.active);
+      validatedStatus = validateStatus(req.query.status);
       validatedSort = validateSort(req.query.sort);
       validatedOrder = validateOrder(req.query.order);
       validatedLimit = validateLimit(req.query.limit);
@@ -295,7 +296,7 @@ router.get('/', async (req, res) => {
       });
     }
     
-    // Build filter
+    // Build filter based on status
     const filter = {};
     
     if (validatedCampusId !== null) {
@@ -311,8 +312,47 @@ router.get('/', async (req, res) => {
       filter.grade = validatedGrade;
     }
     
-    if (validatedActive !== null) {
-      filter["active?"] = validatedActive;
+    // Status-based filters
+    if (validatedStatus) {
+      switch (validatedStatus) {
+        case 'active':
+          filter['active?'] = true;
+          filter['alumni?'] = false;
+          filter['staff?'] = false;
+          break;
+        case 'alumni':
+          filter['alumni?'] = true;
+          break;
+        case 'staff':
+          filter['staff?'] = true;
+          break;
+        case 'blackholed':
+          filter.blackholed = true;
+          break;
+        case 'sinker':
+          filter.sinker = true;
+          break;
+        case 'freeze':
+          filter.freeze = true;
+          break;
+        case 'test':
+          filter.is_test = true;
+          break;
+        case 'inactive':
+          filter['active?'] = false;
+          break;
+        case 'transcender':
+          filter.grade = 'Learner';
+          filter['active?'] = true;
+          break;
+        case 'cadet':
+          filter.grade = 'Member';
+          filter['active?'] = true;
+          break;
+        case 'piscine':
+          filter.is_piscine = true;
+          break;
+      }
     }
     
     // Get total count
@@ -328,11 +368,117 @@ router.get('/', async (req, res) => {
       });
     }
     
+    // Fetch all projects, feedbacks, patronages, and locationstats for calculations
+    let allProjects = [];
+    let allFeedbacks = [];
+    let allPatronages = [];
+    let allLocations = [];
+    
+    try {
+      const [projectsRes, feedbacksRes, patronagesRes, locationsRes] = await Promise.all([
+        Project.find(validatedCampusId !== null ? { campusId: validatedCampusId } : {}),
+        Feedback.find(validatedCampusId !== null ? { campusId: validatedCampusId } : {}),
+        Patronage.find(validatedCampusId !== null ? { campusId: validatedCampusId } : {}),
+        LocationStats.find(validatedCampusId !== null ? { campusId: validatedCampusId } : {})
+      ]);
+      
+      allProjects = projectsRes?.rows || [];
+      allFeedbacks = feedbacksRes?.rows || [];
+      allPatronages = patronagesRes?.rows || [];
+      allLocations = locationsRes?.rows || [];
+    } catch (dbError) {
+      console.error('Error fetching related data:', dbError.message);
+    }
+    
+    // Build lookup maps for calculations
+    const projectsByLogin = {};
+    const cheatsByLogin = {};
+    const feedbacksByLogin = {};
+    const patronageByLogin = {};
+    const locationsByLogin = {};
+    
+    allProjects.forEach(p => {
+      if (!projectsByLogin[p.login]) projectsByLogin[p.login] = [];
+      projectsByLogin[p.login].push(p);
+      
+      // Count cheats (score === -42)
+      if (p.score === -42) {
+        cheatsByLogin[p.login] = (cheatsByLogin[p.login] || 0) + 1;
+      }
+    });
+    
+    allFeedbacks.forEach(f => {
+      if (!feedbacksByLogin[f.login]) feedbacksByLogin[f.login] = [];
+      feedbacksByLogin[f.login].push(f);
+    });
+    
+    allPatronages.forEach(p => {
+      patronageByLogin[p.login] = p;
+    });
+    
+    allLocations.forEach(l => {
+      locationsByLogin[l.login] = l;
+    });
+    
+    // Enrich students with calculated fields
+    const enrichedStudents = allStudents.map(s => {
+      const projects = projectsByLogin[s.login] || [];
+      const feedbacks = feedbacksByLogin[s.login] || [];
+      const patronage = patronageByLogin[s.login];
+      const location = locationsByLogin[s.login];
+      
+      // Calculate metrics
+      const project_count = projects.length;
+      const cheat_count = cheatsByLogin[s.login] || 0;
+      const feedback_count = feedbacks.length;
+      const avg_rating = feedback_count > 0 
+        ? feedbacks.reduce((sum, f) => sum + (f.rating || 0), 0) / feedback_count 
+        : 0;
+      
+      const godfather_count = patronage?.godfathers?.length || 0;
+      const children_count = patronage?.children?.length || 0;
+      
+      // Calculate log_time (total minutes from last 3 months)
+      let log_time = 0;
+      if (location && location.months) {
+        const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        Object.entries(location.months).forEach(([monthKey, monthData]) => {
+          const monthDate = new Date(monthKey + '-01');
+          if (monthDate >= threeMonthsAgo && monthData.days) {
+            Object.values(monthData.days).forEach(durationStr => {
+              if (durationStr && durationStr !== "00:00:00") {
+                const parts = durationStr.split(':');
+                const hours = parseInt(parts[0]) || 0;
+                const minutes = parseInt(parts[1]) || 0;
+                log_time += hours * 60 + minutes;
+              }
+            });
+          }
+        });
+      }
+      
+      // Calculate evo_performance (placeholder - can be refined)
+      // Simple formula: (projects * 10) + (avg_rating * 5) - (cheat_count * 20)
+      const evo_performance = (project_count * 10) + (avg_rating * 5) - (cheat_count * 20);
+      
+      return {
+        ...s,
+        project_count,
+        cheat_count,
+        feedback_count,
+        avg_rating,
+        godfather_count,
+        children_count,
+        log_time,
+        evo_performance
+      };
+    });
+    
     // Apply search filter if needed (already sanitized)
-    let filteredStudents = allStudents;
+    let filteredStudents = enrichedStudents;
     if (validatedSearch) {
       const searchLower = validatedSearch.toLowerCase();
-      filteredStudents = allStudents.filter(s => 
+      filteredStudents = enrichedStudents.filter(s => 
         s.login?.toLowerCase().includes(searchLower) ||
         s.first_name?.toLowerCase().includes(searchLower) ||
         s.last_name?.toLowerCase().includes(searchLower)
@@ -388,7 +534,15 @@ router.get('/', async (req, res) => {
         "active?": s["active?"],
         grade: s.grade,
         campusId: s.campusId,
-        image: s.image
+        image: s.image,
+        ...(s.project_count > 0 && { project_count: s.project_count }),
+        ...(s.cheat_count > 0 && { cheat_count: s.cheat_count }),
+        ...(s.feedback_count > 0 && { feedback_count: s.feedback_count }),
+        ...(s.avg_rating > 0 && { avg_rating: Math.round(s.avg_rating * 100) / 100 }),
+        ...(s.godfather_count > 0 && { godfather_count: s.godfather_count }),
+        ...(s.children_count > 0 && { children_count: s.children_count }),
+        ...(s.log_time > 0 && { log_time: s.log_time }),
+        ...(s.evo_performance !== 0 && { evo_performance: Math.round(s.evo_performance * 100) / 100 })
       }));
     
     const totalPages = Math.ceil(total / validatedLimit);

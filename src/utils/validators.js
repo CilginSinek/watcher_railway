@@ -132,7 +132,9 @@ function validateGrade(grade) {
 function validateSort(sort) {
   const allowedFields = [
     'login', 'level', 'wallet', 'correction_point',
-    'first_name', 'last_name', 'displayname', 'pool_month', 'pool_year'
+    'first_name', 'last_name', 'displayname', 'pool_month', 'pool_year',
+    'project_count', 'cheat_count', 'godfather_count', 'children_count',
+    'log_time', 'evo_performance', 'feedback_count', 'avg_rating'
   ];
   
   if (!sort || !allowedFields.includes(sort)) {
@@ -196,6 +198,28 @@ function validateSkip(skip) {
 }
 
 /**
+ * Validate status filter
+ * @param {string} status - Status value
+ * @returns {string|null} - Validated status
+ */
+function validateStatus(status) {
+  if (!status || status === 'all') {
+    return null;
+  }
+  
+  const validStatuses = [
+    'active', 'alumni', 'staff', 'blackholed', 'transcender',
+    'cadet', 'piscine', 'sinker', 'freeze', 'inactive', 'test'
+  ];
+  
+  if (!validStatuses.includes(status)) {
+    throw new Error('Invalid status filter');
+  }
+  
+  return status;
+}
+
+/**
  * Validate active status
  * @param {string} active - Active status
  * @returns {boolean|null} - Validated boolean or null
@@ -226,5 +250,6 @@ module.exports = {
   validateOrder,
   validateLimit,
   validateSkip,
-  validateActive
+  validateActive,
+  validateStatus
 };

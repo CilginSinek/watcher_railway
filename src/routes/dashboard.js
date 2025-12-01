@@ -190,7 +190,9 @@ router.get('/', async (req, res) => {
             id: student.id,
             login: student.login,
             displayname: student.displayname,
-            image: student.image
+            image: student.image,
+            correction_point: student.correction_point,
+            wallet: student.wallet
           } : null
         };
       });
@@ -208,7 +210,9 @@ router.get('/', async (req, res) => {
         id: s.id,
         login: s.login,
         displayname: s.displayname,
-        image: s.image
+        image: s.image,
+        correction_point: s.correction_point,
+        wallet: s.wallet
       }
     }));
     
@@ -223,7 +227,9 @@ router.get('/', async (req, res) => {
         id: s.id,
         login: s.login,
         displayname: s.displayname,
-        image: s.image
+        image: s.image,
+        correction_point: s.correction_point,
+        wallet: s.wallet
       }
     }));
     
@@ -238,7 +244,9 @@ router.get('/', async (req, res) => {
         id: s.id,
         login: s.login,
         displayname: s.displayname,
-        image: s.image
+        image: s.image,
+        correction_point: s.correction_point,
+        wallet: s.wallet
       }
     }));
     
