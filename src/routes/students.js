@@ -389,51 +389,22 @@ router.get('/', async (req, res) => {
       'feedback_count', 'avg_rating'
     ].includes(validatedSort);
     
-    // If NOT sorting by calculated fields, sort now and paginate
-    if (!isCalculatedField) {
-      filteredStudents.sort((a, b) => {
-        let aVal = a[validatedSort];
-        let bVal = b[validatedSort];
-        
-        if (aVal === null || aVal === undefined) aVal = typeof bVal === 'number' ? -Infinity : '';
-        if (bVal === null || bVal === undefined) bVal = typeof aVal === 'number' ? -Infinity : '';
-        
-        if (typeof aVal === 'string') {
-          aVal = aVal.toLowerCase();
-          bVal = (bVal || '').toString().toLowerCase();
-        }
-        
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
-          return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
-        }
-        
-        return validatedOrder === 'asc' ? (aVal > bVal ? 1 : -1) : (aVal < bVal ? 1 : -1);
-      });
-    }
+    let enrichedStudents = filteredStudents;
     
-    // Paginate FIRST - only get students for current page
-    const paginatedStudents = filteredStudents.slice(validatedSkip, validatedSkip + validatedLimit);
-    
-    // Only enrich the paginated students (20-50 students max)
-    const studentLogins = paginatedStudents.map(s => s.login);
-    let enrichedStudents = paginatedStudents;
-    
-    // Only fetch related data if we need calculated fields for display
-    // Check if any calculated field is needed (either sorting or if user wants to see them)
-    const needsEnrichment = isCalculatedField || studentLogins.length <= 50; // Always enrich if <= 50 students
-    
-    if (needsEnrichment && studentLogins.length > 0) {
+    // If sorting by calculated field, we MUST enrich ALL filtered students before pagination
+    if (isCalculatedField) {
+      const allLogins = filteredStudents.map(s => s.login);
+      const projectsByLogin = {};
+      const feedbacksByLogin = {};
+      const patronageByLogin = {};
+      const locationByLogin = {};
+      
       try {
-        // Fetch data in smaller batches to avoid timeout
-        const batchSize = 10;
-        const projectsByLogin = {};
-        const feedbacksByLogin = {};
-        const patronageByLogin = {};
-        const locationByLogin = {};
+        // Fetch data in batches to avoid timeout
+        const batchSize = 20;
         
-        // Process in batches of 10 students at a time
-        for (let i = 0; i < studentLogins.length; i += batchSize) {
-          const batch = studentLogins.slice(i, i + batchSize);
+        for (let i = 0; i < allLogins.length; i += batchSize) {
+          const batch = allLogins.slice(i, i + batchSize);
           
           const [projectsResults, feedbacksResults, patronageResults, locationResults] = await Promise.all([
             Promise.all(batch.map(login => 
@@ -454,7 +425,6 @@ router.get('/', async (req, res) => {
             ))
           ]);
           
-          // Map results back to logins
           batch.forEach((login, idx) => {
             projectsByLogin[login] = projectsResults[idx]?.rows || [];
             feedbacksByLogin[login] = feedbacksResults[idx]?.rows || [];
@@ -463,8 +433,8 @@ router.get('/', async (req, res) => {
           });
         }
         
-        // Enrich students with calculated data
-        enrichedStudents = paginatedStudents.map((s) => {
+        // Enrich ALL students with calculated data
+        enrichedStudents = filteredStudents.map((s) => {
           const projects = projectsByLogin[s.login] || [];
           const feedbacks = feedbacksByLogin[s.login] || [];
           const patronage = patronageByLogin[s.login];
@@ -511,25 +481,138 @@ router.get('/', async (req, res) => {
           };
         });
       } catch (dbError) {
-        console.error('Error fetching related data:', dbError.message);
+        console.error('Error fetching calculated field data:', dbError.message);
       }
-    }
-    
-    // If sorting by calculated field, sort AFTER enrichment
-    if (isCalculatedField) {
+      
+      // Sort by calculated field
+      enrichedStudents.sort((a, b) => {
+        let aVal = a[validatedSort] || 0;
+        let bVal = b[validatedSort] || 0;
+        return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
+      });
+    } else {
+      // Sort by basic field BEFORE pagination
       enrichedStudents.sort((a, b) => {
         let aVal = a[validatedSort];
         let bVal = b[validatedSort];
         
-        if (aVal === null || aVal === undefined) aVal = -Infinity;
-        if (bVal === null || bVal === undefined) bVal = -Infinity;
+        if (aVal === null || aVal === undefined) aVal = typeof bVal === 'number' ? -Infinity : '';
+        if (bVal === null || bVal === undefined) bVal = typeof aVal === 'number' ? -Infinity : '';
         
-        return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
+        if (typeof aVal === 'string') {
+          aVal = aVal.toLowerCase();
+          bVal = (bVal || '').toString().toLowerCase();
+        }
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        return validatedOrder === 'asc' ? (aVal > bVal ? 1 : -1) : (aVal < bVal ? 1 : -1);
       });
     }
     
+    // NOW paginate after sorting
+    const paginatedStudents = enrichedStudents.slice(validatedSkip, validatedSkip + validatedLimit);
+    
+    // For non-calculated fields, enrich only the paginated students
+    let finalStudents = paginatedStudents;
+    
+    if (!isCalculatedField) {
+      const studentLogins = paginatedStudents.map(s => s.login);
+      const projectsByLogin = {};
+      const feedbacksByLogin = {};
+      const patronageByLogin = {};
+      const locationByLogin = {};
+      
+      if (studentLogins.length > 0) {
+        try {
+          const batchSize = 20;
+          
+          for (let i = 0; i < studentLogins.length; i += batchSize) {
+            const batch = studentLogins.slice(i, i + batchSize);
+            
+            const [projectsResults, feedbacksResults, patronageResults, locationResults] = await Promise.all([
+              Promise.all(batch.map(login => 
+                Project.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+                  .catch(err => ({ rows: [] }))
+              )),
+              Promise.all(batch.map(login => 
+                Feedback.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+                  .catch(err => ({ rows: [] }))
+              )),
+              Promise.all(batch.map(login => 
+                Patronage.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+                  .catch(err => ({ rows: [] }))
+              )),
+              Promise.all(batch.map(login => 
+                LocationStats.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+                  .catch(err => ({ rows: [] }))
+              ))
+            ]);
+            
+            batch.forEach((login, idx) => {
+              projectsByLogin[login] = projectsResults[idx]?.rows || [];
+              feedbacksByLogin[login] = feedbacksResults[idx]?.rows || [];
+              patronageByLogin[login] = (patronageResults[idx]?.rows || [])[0];
+              locationByLogin[login] = (locationResults[idx]?.rows || [])[0];
+            });
+          }
+          
+          finalStudents = paginatedStudents.map((s) => {
+            const projects = projectsByLogin[s.login] || [];
+            const feedbacks = feedbacksByLogin[s.login] || [];
+            const patronage = patronageByLogin[s.login];
+            const location = locationByLogin[s.login];
+            
+            const project_count = projects.length;
+            const cheat_count = projects.filter(p => p.score === -42).length;
+            const feedback_count = feedbacks.length;
+            const avg_rating = feedback_count > 0 
+              ? feedbacks.reduce((sum, f) => sum + (f.rating || 0), 0) / feedback_count 
+              : 0;
+            
+            const godfather_count = patronage?.godfathers?.length || 0;
+            const children_count = patronage?.children?.length || 0;
+            
+            let log_time = 0;
+            if (location?.months) {
+              const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+              Object.entries(location.months).forEach(([monthKey, monthData]) => {
+                const monthDate = new Date(monthKey + '-01');
+                if (monthDate >= threeMonthsAgo && monthData.days) {
+                  Object.values(monthData.days).forEach(durationStr => {
+                    if (durationStr && durationStr !== "00:00:00") {
+                      const [hours = 0, minutes = 0] = durationStr.split(':').map(Number);
+                      log_time += hours * 60 + minutes;
+                    }
+                  });
+                }
+              });
+            }
+            
+            const evo_performance = (project_count * 10) + (avg_rating * 5) - (cheat_count * 20);
+            
+            return {
+              ...s,
+              project_count,
+              cheat_count,
+              feedback_count,
+              avg_rating,
+              godfather_count,
+              children_count,
+              log_time,
+              evo_performance
+            };
+          });
+        } catch (dbError) {
+          console.error('Error fetching enrichment data:', dbError.message);
+        }
+      }
+    }
+    
     // Map to response format
-    const students = enrichedStudents.map(s => ({
+    const students = finalStudents.map(s => ({
         id: s.id,
         login: s.login,
         email: s.email,
