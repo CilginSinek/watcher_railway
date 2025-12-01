@@ -43,9 +43,10 @@ router.get('/pools', async (req, res) => {
     
     let students = [];
     try {
-      students = await Student.find(filter);
+      const result = await Student.find(filter);
+      students = Array.isArray(result) ? result : [];
     } catch (dbError) {
-      console.error('Error fetching students for pools:', dbError);
+      console.error('Error fetching students for pools:', dbError.message);
       return res.status(500).json({ 
         error: 'Failed to fetch pools data',
         message: 'Database query failed'
@@ -112,9 +113,10 @@ router.get('/:login', async (req, res) => {
     // Get projects
     let projects = [];
     try {
-      projects = await Project.find({ login: validatedLogin });
+      const result = await Project.find({ login: validatedLogin });
+      projects = Array.isArray(result) ? result : [];
     } catch (dbError) {
-      console.error('Error fetching projects:', dbError);
+      console.error('Error fetching projects:', dbError.message);
       projects = [];
     }
     const projectsData = projects.map(p => ({
@@ -132,9 +134,10 @@ router.get('/:login', async (req, res) => {
     // Get location stats
     let locationStats = [];
     try {
-      locationStats = await LocationStats.find({ login: validatedLogin });
+      const result = await LocationStats.find({ login: validatedLogin });
+      locationStats = Array.isArray(result) ? result : [];
     } catch (dbError) {
-      console.error('Error fetching location stats:', dbError);
+      console.error('Error fetching location stats:', dbError.message);
       locationStats = [];
     }
     const locationData = locationStats.map(l => ({
@@ -149,9 +152,10 @@ router.get('/:login', async (req, res) => {
     // Get feedbacks
     let feedbacks = [];
     try {
-      feedbacks = await Feedback.find({ login: validatedLogin });
+      const result = await Feedback.find({ login: validatedLogin });
+      feedbacks = Array.isArray(result) ? result : [];
     } catch (dbError) {
-      console.error('Error fetching feedbacks:', dbError);
+      console.error('Error fetching feedbacks:', dbError.message);
       feedbacks = [];
     }
     const feedbacksData = feedbacks.map(f => ({
@@ -168,7 +172,8 @@ router.get('/:login', async (req, res) => {
     let asPatron = [];
     let patroned = [];
     try {
-      asPatron = await Patronage.find({ godfather_login: validatedLogin });
+      const result = await Patronage.find({ godfather_login: validatedLogin });
+      asPatron = Array.isArray(result) ? result : [];
       patroned = await Promise.all(
         asPatron.map(async (p) => {
           try {
@@ -180,13 +185,13 @@ router.get('/:login', async (req, res) => {
               image: patronedStudent.image
             } : null;
           } catch (err) {
-            console.error(`Error fetching patroned student ${p.user_login}:`, err);
+            console.error(`Error fetching patroned student ${p.user_login}:`, err.message);
             return null;
           }
         })
       );
     } catch (dbError) {
-      console.error('Error fetching patronage:', dbError);
+      console.error('Error fetching patronage:', dbError.message);
       patroned = [];
     }
     
@@ -206,7 +211,7 @@ router.get('/:login', async (req, res) => {
         }
       }
     } catch (dbError) {
-      console.error('Error fetching patron:', dbError);
+      console.error('Error fetching patron:', dbError.message);
       patron = null;
     }
     
@@ -304,9 +309,10 @@ router.get('/', async (req, res) => {
     // Get total count
     let allStudents = [];
     try {
-      allStudents = await Student.find(filter);
+      const result = await Student.find(filter);
+      allStudents = Array.isArray(result) ? result : [];
     } catch (dbError) {
-      console.error('Error fetching students:', dbError);
+      console.error('Error fetching students:', dbError.message);
       return res.status(500).json({ 
         error: 'Failed to fetch students',
         message: 'Database query failed'
