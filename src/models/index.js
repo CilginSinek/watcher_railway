@@ -54,7 +54,8 @@ const studentSchema = new Schema({
 
 const Student = model('Student', studentSchema, { 
   collectionName: 'students',
-  scopeName: '_default' 
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 // ---------------------------------------------------------
@@ -77,7 +78,8 @@ const projectSchema = new Schema({
 
 const Project = model('Project', projectSchema, { 
   collectionName: 'projects',
-  scopeName: '_default'
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 // ---------------------------------------------------------
@@ -97,7 +99,8 @@ const locationStatsSchema = new Schema({
 
 const LocationStats = model('LocationStats', locationStatsSchema, { 
   collectionName: 'locationstats',
-  scopeName: '_default'
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 // ---------------------------------------------------------
@@ -119,7 +122,8 @@ const patronageSchema = new Schema({
 
 const Patronage = model('Patronage', patronageSchema, { 
   collectionName: 'patronages',
-  scopeName: '_default'
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 // ---------------------------------------------------------
@@ -146,7 +150,8 @@ const feedbackSchema = new Schema({
 
 const Feedback = model('Feedback', feedbackSchema, { 
   collectionName: 'feedbacks',
-  scopeName: '_default'
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 // ---------------------------------------------------------
@@ -168,7 +173,8 @@ const projectReviewSchema = new Schema({
 
 const ProjectReview = model('ProjectReview', projectReviewSchema, { 
   collectionName: 'projectreviews',
-  scopeName: '_default'
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 module.exports = { 
