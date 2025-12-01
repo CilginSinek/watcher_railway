@@ -371,11 +371,17 @@ router.get('/', async (req, res) => {
         image: s.image
       }));
     
+    const totalPages = Math.ceil(total / validatedLimit);
+    const currentPage = Math.floor(validatedSkip / validatedLimit) + 1;
+    
     res.json({
       students,
-      total,
-      limit: validatedLimit,
-      skip: validatedSkip
+      pagination: {
+        total,
+        page: currentPage,
+        limit: validatedLimit,
+        totalPages
+      }
     });
   } catch (error) {
     console.error('Students list error:', error);

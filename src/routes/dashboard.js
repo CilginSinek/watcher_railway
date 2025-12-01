@@ -37,6 +37,22 @@ router.get('/', async (req, res) => {
     
     console.log('Dashboard query - campusFilter:', campusFilter);
     
+    // Fetch all students once for better performance
+    let allStudentsCache = [];
+    try {
+      const result = await Student.find(campusFilter);
+      allStudentsCache = result?.rows || [];
+    } catch (dbError) {
+      console.error('Error fetching students cache:', dbError.message);
+      allStudentsCache = [];
+    }
+    
+    // Create student lookup map
+    const studentMap = {};
+    allStudentsCache.forEach(s => {
+      studentMap[s.login] = s;
+    });
+    
     // 1. Top Project Submitters (current month)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     console.log('Month start:', monthStart);
@@ -67,42 +83,31 @@ router.get('/', async (req, res) => {
       projectsByStudent[p.login].totalScore += p.score || 0; // DB uses 'score' not 'final_mark'
     });
     
-    const topProjectSubmitters = await Promise.all(
-      Object.entries(projectsByStudent)
-        .sort((a, b) => b[1].count - a[1].count)
-        .slice(0, 10)
-        .map(async ([login, data]) => {
-          try {
-            const student = await Student.findOne({ login });
-            return {
-              login,
-              projectCount: data.count,
-              totalScore: data.totalScore,
-              student: student ? {
-                id: student.id,
-                login: student.login,
-                displayname: student.displayname,
-                image: student.image
-              } : null
-            };
-          } catch (err) {
-            console.error(`Error fetching student ${login}:`, err);
-            return {
-              login,
-              projectCount: data.count,
-              totalScore: data.totalScore,
-              student: null
-            };
-          }
-        })
-    );
+    const topProjectSubmitters = Object.entries(projectsByStudent)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 10)
+      .map(([login, data]) => {
+        const student = studentMap[login];
+        return {
+          login,
+          projectCount: data.count,
+          totalScore: data.totalScore,
+          student: student ? {
+            id: student.id,
+            login: student.login,
+            displayname: student.displayname,
+            image: student.image
+          } : null
+        };
+      });
     
-    // 2. Top Location Stats (current month)
+    // 2. Top Location Stats (last 3 months)
+    const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
     let locationsThisMonth = [];
     try {
       const result = await LocationStats.find({
         ...campusFilter,
-        begin_at: { $gte: monthStart }
+        begin_at: { $gte: threeMonthsAgo }
       });
       locationsThisMonth = result?.rows || [];
     } catch (dbError) {
@@ -122,29 +127,22 @@ router.get('/', async (req, res) => {
       timeByStudent[loc.login] += minutes;
     });
     
-    const topLocationStats = await Promise.all(
-      Object.entries(timeByStudent)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(async ([login, totalTime]) => {
-          try {
-            const student = await Student.findOne({ login });
-            return {
-              login,
-              totalTime,
-              student: student ? {
-                id: student.id,
-                login: student.login,
-                displayname: student.displayname,
-                image: student.image
-              } : null
-            };
-          } catch (err) {
-            console.error(`Error fetching student ${login}:`, err);
-            return { login, totalTime, student: null };
-          }
-        })
-    );
+    const topLocationStats = Object.entries(timeByStudent)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3) // Only top 3 students
+      .map(([login, totalTime]) => {
+        const student = studentMap[login];
+        return {
+          login,
+          totalTime,
+          student: student ? {
+            id: student.id,
+            login: student.login,
+            displayname: student.displayname,
+            image: student.image
+          } : null
+        };
+      });
     
     // 3. All Time Projects
     let allProjects = [];
@@ -160,43 +158,28 @@ router.get('/', async (req, res) => {
       allProjectsByStudent[p.login] = (allProjectsByStudent[p.login] || 0) + 1;
     });
     
-    const allTimeProjects = await Promise.all(
-      Object.entries(allProjectsByStudent)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(async ([login, projectCount]) => {
-          try {
-            const student = await Student.findOne({ login });
-            return {
-              login,
-              projectCount,
-              student: student ? {
-                id: student.id,
-                login: student.login,
-                displayname: student.displayname,
-                image: student.image
-              } : null
-            };
-          } catch (err) {
-            console.error(`Error fetching student ${login}:`, err);
-            return { login, projectCount, student: null };
-          }
-        })
-    );
+    const allTimeProjects = Object.entries(allProjectsByStudent)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([login, projectCount]) => {
+        const student = studentMap[login];
+        return {
+          login,
+          projectCount,
+          student: student ? {
+            id: student.id,
+            login: student.login,
+            displayname: student.displayname,
+            image: student.image
+          } : null
+        };
+      });
     
-    // 4. All Time Wallet
-    let allTimeWallet = [];
-    try {
-      const result = await Student.find(campusFilter);
-      const students = result?.rows || [];
-      console.log('Students found for wallet:', students.length);
-      const sorted = students.sort((a, b) => (b.wallet || 0) - (a.wallet || 0)).slice(0, 10);
-      allTimeWallet = sorted;
-      console.log('Top wallet students:', allTimeWallet.length);
-    } catch (dbError) {
-      console.error('Error fetching wallet stats:', dbError.message);
-      allTimeWallet = [];
-    }
+    // 4. All Time Wallet (use cached students)
+    console.log('Students found for wallet:', allStudentsCache.length);
+    const sorted = allStudentsCache.sort((a, b) => (b.wallet || 0) - (a.wallet || 0)).slice(0, 10);
+    const allTimeWallet = sorted;
+    console.log('Top wallet students:', allTimeWallet.length);
     
     const walletData = allTimeWallet.map(s => ({
       login: s.login,
@@ -209,17 +192,9 @@ router.get('/', async (req, res) => {
       }
     }));
     
-    // 5. All Time Correction Points
-    let allTimePoints = [];
-    try {
-      const result = await Student.find(campusFilter);
-      const students = result?.rows || [];
-      const sorted = students.sort((a, b) => (b.correction_point || 0) - (a.correction_point || 0)).slice(0, 10);
-      allTimePoints = sorted;
-    } catch (dbError) {
-      console.error('Error fetching correction points:', dbError.message);
-      allTimePoints = [];
-    }
+    // 5. All Time Correction Points (use cached students)
+    const sortedPoints = [...allStudentsCache].sort((a, b) => (b.correction_point || 0) - (a.correction_point || 0)).slice(0, 10);
+    const allTimePoints = sortedPoints;
     
     const pointsData = allTimePoints.map(s => ({
       login: s.login,
@@ -232,17 +207,9 @@ router.get('/', async (req, res) => {
       }
     }));
     
-    // 6. All Time Levels
-    let allTimeLevels = [];
-    try {
-      const result = await Student.find(campusFilter);
-      const students = result?.rows || [];
-      const sorted = students.sort((a, b) => (b.level || 0) - (a.level || 0)).slice(0, 10);
-      allTimeLevels = sorted;
-    } catch (dbError) {
-      console.error('Error fetching levels:', dbError.message);
-      allTimeLevels = [];
-    }
+    // 6. All Time Levels (use cached students)
+    const sortedLevels = [...allStudentsCache].sort((a, b) => (b.level || 0) - (a.level || 0)).slice(0, 10);
+    const allTimeLevels = sortedLevels;
     
     const levelsData = allTimeLevels.map(s => ({
       login: s.login,
@@ -255,16 +222,9 @@ router.get('/', async (req, res) => {
       }
     }));
     
-    // 7. Grade Distribution
-    let allStudents = [];
-    try {
-      const result = await Student.find(campusFilter);
-      allStudents = result?.rows || [];
-      console.log('All students found:', allStudents.length);
-    } catch (dbError) {
-      console.error('Error fetching students for grade distribution:', dbError.message);
-      allStudents = [];
-    }
+    // 7. Grade Distribution (use cached students)
+    console.log('All students found:', allStudentsCache.length);
+    const allStudents = allStudentsCache;
     const gradeCount = {};
     allStudents.forEach(s => {
       const grade = s.grade || 'Unknown';
