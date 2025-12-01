@@ -29,8 +29,18 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Apply authentication middleware to /api routes
-app.use('/api', authenticate);
+// Handle OPTIONS requests for CORS preflight (no auth required)
+app.options('*', (req, res) => {
+  res.sendStatus(200);
+});
+
+// Apply authentication middleware to /api routes (skip OPTIONS)
+app.use('/api', (req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  authenticate(req, res, next);
+});
 
 // API Routes
 app.use('/api/dashboard', dashboardRoutes);
