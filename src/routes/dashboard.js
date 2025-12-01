@@ -146,11 +146,15 @@ router.get('/', async (req, res) => {
     const topLocationStats = Object.entries(timeByStudent)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3) // Only top 3 students
-      .map(([login, totalTime]) => {
+      .map(([login, totalMinutes]) => {
         const student = studentMap[login];
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        
         return {
           login,
-          totalTime,
+          totalTime: `${hours}h ${minutes}m`,
+          totalMinutes, // Keep for sorting/reference
           student: student ? {
             id: student.id,
             login: student.login,
