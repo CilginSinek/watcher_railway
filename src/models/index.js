@@ -59,17 +59,9 @@ const studentSchema = new Schema({
   is_test: { type: Boolean, default: false },
   level: { type: Number, default: null }
 }, { 
-  timestamps: true,
-  indexes: {
-    findByCampusAndActive: { by: ['campusId', 'active?'] },
-    findByLogin: { by: 'login' },
-    findById: { by: 'id' },
-    findByPool: { by: ['pool_month', 'pool_year'] },
-    findByGrade: { by: 'grade' },
-    findByLevel: { by: 'level' },
-    findByWallet: { by: 'wallet' },
-    findByCorrectionPoint: { by: 'correction_point' }
-  }
+  timestamps: true
+  // Removed indexes - they cause memory corruption in Ottoman
+  // Create indexes manually in Couchbase using N1QL
 });
 
 const Student = createModel('Student', studentSchema, { 
@@ -95,13 +87,8 @@ const projectSchema = new Schema({
   "validated?": { type: Boolean, default: false },
   date: { type: String, required: true }
 }, { 
-  timestamps: true,
-  indexes: {
-    findByLogin: { by: 'login' },
-    findByCampus: { by: 'campusId' },
-    findByDate: { by: 'date' },
-    findByLoginAndDate: { by: ['login', 'date'] }
-  }
+  timestamps: true
+  // Removed indexes - create manually in Couchbase
 });
 
 const Project = createModel('Project', projectSchema, { 
@@ -120,13 +107,8 @@ const locationStatsSchema = new Schema({
   begin_at: { type: String, required: true },
   end_at: { type: String, default: null }
 }, { 
-  timestamps: true,
-  indexes: {
-    findByLogin: { by: 'login' },
-    findByCampus: { by: 'campusId' },
-    findByBeginAt: { by: 'begin_at' },
-    findByLoginAndBegin: { by: ['login', 'begin_at'] }
-  }
+  timestamps: true
+  // Removed indexes - create manually in Couchbase
 });
 
 const LocationStats = createModel('LocationStats', locationStatsSchema, { 
@@ -145,12 +127,8 @@ const patronageSchema = new Schema({
   godfather_login: { type: String, required: true },
   campusId: { type: Number, required: true }
 }, { 
-  timestamps: true,
-  indexes: {
-    findByUserLogin: { by: 'user_login' },
-    findByGodfatherLogin: { by: 'godfather_login' },
-    findByCampus: { by: 'campusId' }
-  }
+  timestamps: true
+  // Removed indexes - create manually in Couchbase
 });
 
 const Patronage = createModel('Patronage', patronageSchema, { 
@@ -170,12 +148,8 @@ const feedbackSchema = new Schema({
   final_mark: { type: Number, required: true },
   created_at: { type: String, required: true }
 }, { 
-  timestamps: true,
-  indexes: {
-    findByLogin: { by: 'login' },
-    findByCampus: { by: 'campusId' },
-    findByCreatedAt: { by: 'created_at' }
-  }
+  timestamps: true
+  // Removed indexes - create manually in Couchbase
 });
 
 const Feedback = createModel('Feedback', feedbackSchema, { 
