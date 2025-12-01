@@ -375,7 +375,8 @@ router.get('/', async (req, res) => {
       filteredStudents = allStudents.filter(s => 
         s.login?.toLowerCase().includes(searchLower) ||
         s.first_name?.toLowerCase().includes(searchLower) ||
-        s.last_name?.toLowerCase().includes(searchLower)
+        s.last_name?.toLowerCase().includes(searchLower) ||
+        s.displayname?.toLowerCase().includes(searchLower)
       );
     }
     
@@ -417,31 +418,57 @@ router.get('/', async (req, res) => {
     const studentLogins = paginatedStudents.map(s => s.login);
     let enrichedStudents = paginatedStudents;
     
-    // Only fetch related data if we have students to enrich
-    if (studentLogins.length > 0) {
+    // Only fetch related data if we need calculated fields for display
+    // Check if any calculated field is needed (either sorting or if user wants to see them)
+    const needsEnrichment = isCalculatedField || studentLogins.length <= 50; // Always enrich if <= 50 students
+    
+    if (needsEnrichment && studentLogins.length > 0) {
       try {
-        // Fetch in parallel for all students on this page
-        const [projectsResults, feedbacksResults, patronagesResults, locationsResults] = await Promise.all([
-          Promise.all(studentLogins.map(login => 
-            Project.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-          )),
-          Promise.all(studentLogins.map(login => 
-            Feedback.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-          )),
-          Promise.all(studentLogins.map(login => 
-            Patronage.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-          )),
-          Promise.all(studentLogins.map(login => 
-            LocationStats.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-          ))
-        ]);
+        // Fetch data in smaller batches to avoid timeout
+        const batchSize = 10;
+        const projectsByLogin = {};
+        const feedbacksByLogin = {};
+        const patronageByLogin = {};
+        const locationByLogin = {};
+        
+        // Process in batches of 10 students at a time
+        for (let i = 0; i < studentLogins.length; i += batchSize) {
+          const batch = studentLogins.slice(i, i + batchSize);
+          
+          const [projectsResults, feedbacksResults, patronageResults, locationResults] = await Promise.all([
+            Promise.all(batch.map(login => 
+              Project.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+                .catch(err => ({ rows: [] }))
+            )),
+            Promise.all(batch.map(login => 
+              Feedback.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+                .catch(err => ({ rows: [] }))
+            )),
+            Promise.all(batch.map(login => 
+              Patronage.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+                .catch(err => ({ rows: [] }))
+            )),
+            Promise.all(batch.map(login => 
+              LocationStats.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+                .catch(err => ({ rows: [] }))
+            ))
+          ]);
+          
+          // Map results back to logins
+          batch.forEach((login, idx) => {
+            projectsByLogin[login] = projectsResults[idx]?.rows || [];
+            feedbacksByLogin[login] = feedbacksResults[idx]?.rows || [];
+            patronageByLogin[login] = (patronageResults[idx]?.rows || [])[0];
+            locationByLogin[login] = (locationResults[idx]?.rows || [])[0];
+          });
+        }
         
         // Enrich students with calculated data
-        enrichedStudents = paginatedStudents.map((s, idx) => {
-          const projects = projectsResults[idx]?.rows || [];
-          const feedbacks = feedbacksResults[idx]?.rows || [];
-          const patronage = (patronagesResults[idx]?.rows || [])[0];
-          const location = (locationsResults[idx]?.rows || [])[0];
+        enrichedStudents = paginatedStudents.map((s) => {
+          const projects = projectsByLogin[s.login] || [];
+          const feedbacks = feedbacksByLogin[s.login] || [];
+          const patronage = patronageByLogin[s.login];
+          const location = locationByLogin[s.login];
           
           const project_count = projects.length;
           const cheat_count = projects.filter(p => p.score === -42).length;
