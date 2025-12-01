@@ -1,15 +1,4 @@
-const { ottoman } = require('../config/database');
-const { Schema } = require('ottoman');
-
-// Helper to create models with ottoman instance
-const createModel = (name, schema, options) => {
-  try {
-    return ottoman.model(name, schema, options);
-  } catch (error) {
-    console.error(`Error creating model ${name}:`, error.message);
-    throw error;
-  }
-};
+const { Schema, model } = require('ottoman');
 
 // ---------------------------------------------------------
 // 1. STUDENT MODEL
@@ -43,11 +32,12 @@ const studentSchema = new Schema({
   wallet: Number,
   anonymize_date: String,
   data_erasure_date: String,
-  alumnized_at: String,
+  alumnized_at: String, // Tarih veya null olabiliyor, String/Mixed güvenli
   "alumni?": Boolean,
   "active?": Boolean,
   created_at: String,
   
+  // KRİTİK DEĞİŞİKLİKLER (Null hatasını çözer)
   blackholed: { type: Schema.Types.Mixed, default: null },
   next_milestone: { type: Schema.Types.Mixed, default: null },
   freeze: { type: Schema.Types.Mixed, default: null },
@@ -60,14 +50,11 @@ const studentSchema = new Schema({
   level: { type: Number, default: null }
 }, { 
   timestamps: true
-  // Removed indexes - they cause memory corruption in Ottoman
-  // Create indexes manually in Couchbase using N1QL
 });
 
-const Student = createModel('Student', studentSchema, { 
+const Student = model('Student', studentSchema, { 
   collectionName: 'students',
-  scopeName: '_default',
-  modelKey: 'type' // DB uses 'type' instead of '_type'
+  scopeName: '_default' 
 });
 
 // ---------------------------------------------------------
@@ -76,83 +63,112 @@ const Student = createModel('Student', studentSchema, {
 const projectSchema = new Schema({
   campusId: { type: Number, required: true },
   login: { type: String, required: true },
-  project: { type: String, required: true }, // DB uses 'project' not 'name'
-  score: { type: Number, required: true }, // DB uses 'score' not 'final_mark'
-  status: { type: String, required: true },
-  date: { type: String, required: true }
+  project: { type: String, required: true },
+  score: { type: Number, required: true },
+  date: { type: String, required: true },
+  status: { 
+    type: String, 
+    enum: ['success', 'fail', 'in_progress'],
+    required: true
+  }
 }, { 
   timestamps: true
-  // Removed indexes
 });
 
-const Project = createModel('Project', projectSchema, { 
+const Project = model('Project', projectSchema, { 
   collectionName: 'projects',
-  scopeName: '_default',
-  modelKey: 'type'
+  scopeName: '_default'
 });
 
 // ---------------------------------------------------------
 // 3. LOCATION STATS MODEL
 // ---------------------------------------------------------
 const locationStatsSchema = new Schema({
-  id: { type: Number, required: true },
   login: { type: String, required: true },
   campusId: { type: Number, required: true },
-  host: { type: String, required: true },
-  begin_at: { type: String, required: true },
-  end_at: { type: String, default: null }
+  months: {
+    type: Schema.Types.Mixed, 
+    default: {}
+  },
+  lastUpdated: { type: Date, default: () => new Date() }
 }, { 
   timestamps: true
-  // Removed indexes - create manually in Couchbase
 });
 
-const LocationStats = createModel('LocationStats', locationStatsSchema, { 
+const LocationStats = model('LocationStats', locationStatsSchema, { 
   collectionName: 'locationstats',
-  scopeName: '_default',
-  modelKey: 'type'
+  scopeName: '_default'
 });
 
 // ---------------------------------------------------------
 // 4. PATRONAGE MODEL
 // ---------------------------------------------------------
 const patronageSchema = new Schema({
-  id: { type: Number, required: true },
-  user_id: { type: Number, required: true },
-  user_login: { type: String, required: true },
-  godfather_id: { type: Number, required: true },
-  godfather_login: { type: String, required: true },
-  campusId: { type: Number, required: true }
+  login: { type: String, required: true },
+  campusId: { type: Number, required: true },
+  godfathers: [{
+    login: { type: String, required: true }
+  }],
+  children: [{
+    login: { type: String, required: true }
+  }],
+  lastUpdated: { type: Date, default: () => new Date() }
 }, { 
   timestamps: true
-  // Removed indexes - create manually in Couchbase
 });
 
-const Patronage = createModel('Patronage', patronageSchema, { 
+const Patronage = model('Patronage', patronageSchema, { 
   collectionName: 'patronages',
-  scopeName: '_default',
-  modelKey: 'type'
+  scopeName: '_default'
 });
 
 // ---------------------------------------------------------
 // 5. FEEDBACK MODEL
 // ---------------------------------------------------------
 const feedbackSchema = new Schema({
-  id: { type: Number, required: true },
   login: { type: String, required: true },
   campusId: { type: Number, required: true },
+  evaluator: { type: String, required: true },
+  evaluated: { type: String, required: true },
+  project: { type: String, required: true },
+  date: { type: String, required: true },
   rating: { type: Number, default: null },
-  comment: { type: String, default: null },
-  final_mark: { type: Number, required: true },
-  created_at: { type: String, required: true }
+  ratingDetails: {
+    nice: { type: Number, default: null },
+    rigorous: { type: Number, default: null },
+    interested: { type: Number, default: null },
+    punctuality: { type: Number, default: null }
+  },
+  comment: { type: String, default: null }
 }, { 
   timestamps: true
-  // Removed indexes - create manually in Couchbase
 });
 
-const Feedback = createModel('Feedback', feedbackSchema, { 
+const Feedback = model('Feedback', feedbackSchema, { 
   collectionName: 'feedbacks',
-  scopeName: '_default',
-  modelKey: 'type'
+  scopeName: '_default'
+});
+
+// ---------------------------------------------------------
+// 6. PROJECT REVIEW MODEL
+// ---------------------------------------------------------
+const projectReviewSchema = new Schema({
+  login: { type: String, required: true },
+  campusId: { type: Number, required: true },
+  evaluator: { type: String, required: true },
+  evaluated: { type: String, required: true },
+  project: { type: String, required: true },
+  date: { type: String, required: true },
+  score: { type: Number, default: null },
+  status: { type: String, default: null },
+  evaluatorComment: { type: String, default: null },
+}, { 
+  timestamps: true
+});
+
+const ProjectReview = model('ProjectReview', projectReviewSchema, { 
+  collectionName: 'projectreviews',
+  scopeName: '_default'
 });
 
 module.exports = { 
@@ -160,5 +176,6 @@ module.exports = {
   Project, 
   LocationStats, 
   Patronage, 
-  Feedback
+  Feedback, 
+  ProjectReview 
 };
