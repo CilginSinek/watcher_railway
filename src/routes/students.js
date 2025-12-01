@@ -137,6 +137,10 @@ router.get('/:login', async (req, res) => {
     try {
       const result = await LocationStats.find({ login: validatedLogin });
       locationStats = result?.rows || [];
+      console.log(`LocationStats for ${validatedLogin}:`, locationStats.length, 'found');
+      if (locationStats.length > 0) {
+        console.log('First location sample:', JSON.stringify(locationStats[0]));
+      }
     } catch (dbError) {
       console.error('Error fetching location stats:', dbError.message);
       locationStats = [];
@@ -168,12 +172,20 @@ router.get('/:login', async (req, res) => {
     
     // Calculate logTimes (location history with duration)
     const logTimes = locationStats.map(l => {
+      if (!l.begin_at) return { date: null, duration: 0 };
+      
       const beginAt = new Date(l.begin_at);
       const endAt = l.end_at ? new Date(l.end_at) : new Date();
+      
+      // Check for valid dates
+      if (isNaN(beginAt.getTime()) || isNaN(endAt.getTime())) {
+        return { date: l.begin_at, duration: 0 };
+      }
+      
       const duration = Math.floor((endAt - beginAt) / 60000); // minutes
       return {
         date: l.begin_at,
-        duration
+        duration: duration > 0 ? duration : 0
       };
     });
     
@@ -205,6 +217,10 @@ router.get('/:login', async (req, res) => {
     try {
       const result = await Patronage.find({ godfather_login: validatedLogin });
       const asPatron = result?.rows || [];
+      console.log(`Patronage children for ${validatedLogin}:`, asPatron.length, 'found');
+      if (asPatron.length > 0) {
+        console.log('First patronage sample:', JSON.stringify(asPatron[0]));
+      }
       children = asPatron.map(p => ({ login: p.user_login }));
     } catch (dbError) {
       console.error('Error fetching patronage children:', dbError.message);
@@ -216,6 +232,10 @@ router.get('/:login', async (req, res) => {
     try {
       const result = await Patronage.find({ user_login: validatedLogin });
       const asPatroned = result?.rows || [];
+      console.log(`Patronage godfathers for ${validatedLogin}:`, asPatroned.length, 'found');
+      if (asPatroned.length > 0) {
+        console.log('First godfather sample:', JSON.stringify(asPatroned[0]));
+      }
       godfathers = asPatroned.map(p => ({ login: p.godfather_login }));
     } catch (dbError) {
       console.error('Error fetching patronage godfathers:', dbError.message);
