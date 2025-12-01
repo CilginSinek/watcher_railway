@@ -153,12 +153,13 @@ router.get('/', async (req, res) => {
         
         return {
           login,
-          totalTime: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`,
+          totalDuration: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`,
           student: student ? {
-            id: student.id,
             login: student.login,
             displayname: student.displayname,
-            image: student.image
+            image: student.image,
+            correction_point: student.correction_point,
+            wallet: student.wallet
           } : null
         };
       });
