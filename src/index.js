@@ -18,8 +18,9 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -66,14 +67,21 @@ app.use((err, req, res, next) => {
 // Start server
 async function start() {
   try {
-    // Connect to Couchbase with Ottoman
-    await db.connect();
-    
-    // Start Express server
-    app.listen(PORT, () => {
+    // Start Express server first (Railway needs the port to be listening)
+    const server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
+    
+    // Try to connect to Couchbase with Ottoman (non-blocking)
+    try {
+      await db.connect();
+      console.log('Database connected successfully');
+    } catch (dbError) {
+      console.error('Database connection failed:', dbError.message);
+      console.log('Server running without database connection');
+      // Server continues to run for health checks
+    }
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
