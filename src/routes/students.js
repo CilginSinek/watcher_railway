@@ -120,13 +120,10 @@ router.get('/:login', async (req, res) => {
       projects = [];
     }
     const projectsData = projects.map(p => ({
-      id: p.id,
-      name: p.name,
-      slug: p.slug,
+      project: p.project, // DB uses 'project' field
       login: p.login,
-      final_mark: p.final_mark,
+      score: p.score, // DB uses 'score' not 'final_mark'
       status: p.status,
-      "validated?": p["validated?"],
       date: p.date,
       campusId: p.campusId
     }));

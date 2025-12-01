@@ -50,9 +50,9 @@ router.get('/', async (req, res) => {
       console.log('Projects found:', result?.rows?.length || 0);
       // Ottoman returns {rows: [], meta: {}}
       const projects = result?.rows || [];
-      // Filter validated projects in memory (Ottoman has issues with ? in field names)
-      projectsThisMonth = projects.filter(p => p['validated?'] === true);
-      console.log('Validated projects:', projectsThisMonth.length);
+      // Filter by status (DB doesn't have validated? field)
+      projectsThisMonth = projects.filter(p => p.status === 'finished');
+      console.log('Finished projects:', projectsThisMonth.length);
     } catch (dbError) {
       console.error('Error fetching projects:', dbError.message);
       projectsThisMonth = [];
@@ -64,7 +64,7 @@ router.get('/', async (req, res) => {
         projectsByStudent[p.login] = { count: 0, totalScore: 0 };
       }
       projectsByStudent[p.login].count++;
-      projectsByStudent[p.login].totalScore += p.final_mark || 0;
+      projectsByStudent[p.login].totalScore += p.score || 0; // DB uses 'score' not 'final_mark'
     });
     
     const topProjectSubmitters = await Promise.all(

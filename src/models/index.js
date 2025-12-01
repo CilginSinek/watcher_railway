@@ -66,34 +66,29 @@ const studentSchema = new Schema({
 
 const Student = createModel('Student', studentSchema, { 
   collectionName: 'students',
-  scopeName: '_default' 
+  scopeName: '_default',
+  modelKey: 'type' // DB uses 'type' instead of '_type'
 });
 
 // ---------------------------------------------------------
 // 2. PROJECT MODEL
 // ---------------------------------------------------------
 const projectSchema = new Schema({
-  id: { type: Number, required: true },
   campusId: { type: Number, required: true },
   login: { type: String, required: true },
-  name: { type: String, required: true },
-  slug: { type: String, required: true },
-  final_mark: { type: Number, required: true },
-  status: { 
-    type: String, 
-    enum: ['finished', 'in_progress', 'waiting_for_correction', 'creating_group'],
-    required: true
-  },
-  "validated?": { type: Boolean, default: false },
+  project: { type: String, required: true }, // DB uses 'project' not 'name'
+  score: { type: Number, required: true }, // DB uses 'score' not 'final_mark'
+  status: { type: String, required: true },
   date: { type: String, required: true }
 }, { 
   timestamps: true
-  // Removed indexes - create manually in Couchbase
+  // Removed indexes
 });
 
 const Project = createModel('Project', projectSchema, { 
   collectionName: 'projects',
-  scopeName: '_default'
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 // ---------------------------------------------------------
@@ -113,7 +108,8 @@ const locationStatsSchema = new Schema({
 
 const LocationStats = createModel('LocationStats', locationStatsSchema, { 
   collectionName: 'locationstats',
-  scopeName: '_default'
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 // ---------------------------------------------------------
@@ -133,7 +129,8 @@ const patronageSchema = new Schema({
 
 const Patronage = createModel('Patronage', patronageSchema, { 
   collectionName: 'patronages',
-  scopeName: '_default'
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 // ---------------------------------------------------------
@@ -154,7 +151,8 @@ const feedbackSchema = new Schema({
 
 const Feedback = createModel('Feedback', feedbackSchema, { 
   collectionName: 'feedbacks',
-  scopeName: '_default'
+  scopeName: '_default',
+  modelKey: 'type'
 });
 
 module.exports = { 
