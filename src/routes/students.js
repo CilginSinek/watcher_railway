@@ -44,7 +44,7 @@ router.get('/pools', async (req, res) => {
     let students = [];
     try {
       const result = await Student.find(filter);
-      students = Array.isArray(result) ? result : [];
+      students = result?.rows || [];
     } catch (dbError) {
       console.error('Error fetching students for pools:', dbError.message);
       return res.status(500).json({ 
@@ -114,7 +114,7 @@ router.get('/:login', async (req, res) => {
     let projects = [];
     try {
       const result = await Project.find({ login: validatedLogin });
-      projects = Array.isArray(result) ? result : [];
+      projects = result?.rows || [];
     } catch (dbError) {
       console.error('Error fetching projects:', dbError.message);
       projects = [];
@@ -135,7 +135,7 @@ router.get('/:login', async (req, res) => {
     let locationStats = [];
     try {
       const result = await LocationStats.find({ login: validatedLogin });
-      locationStats = Array.isArray(result) ? result : [];
+      locationStats = result?.rows || [];
     } catch (dbError) {
       console.error('Error fetching location stats:', dbError.message);
       locationStats = [];
@@ -153,7 +153,7 @@ router.get('/:login', async (req, res) => {
     let feedbacks = [];
     try {
       const result = await Feedback.find({ login: validatedLogin });
-      feedbacks = Array.isArray(result) ? result : [];
+      feedbacks = result?.rows || [];
     } catch (dbError) {
       console.error('Error fetching feedbacks:', dbError.message);
       feedbacks = [];
@@ -173,7 +173,7 @@ router.get('/:login', async (req, res) => {
     let patroned = [];
     try {
       const result = await Patronage.find({ godfather_login: validatedLogin });
-      asPatron = Array.isArray(result) ? result : [];
+      asPatron = result?.rows || [];
       patroned = await Promise.all(
         asPatron.map(async (p) => {
           try {
@@ -310,7 +310,7 @@ router.get('/', async (req, res) => {
     let allStudents = [];
     try {
       const result = await Student.find(filter);
-      allStudents = Array.isArray(result) ? result : [];
+      allStudents = result?.rows || [];
     } catch (dbError) {
       console.error('Error fetching students:', dbError.message);
       return res.status(500).json({ 

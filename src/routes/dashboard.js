@@ -47,9 +47,11 @@ router.get('/', async (req, res) => {
         ...campusFilter,
         date: { $gte: monthStart }
       });
-      console.log('Projects found:', Array.isArray(result) ? result.length : 'not array', typeof result);
+      console.log('Projects found:', result?.rows?.length || 0);
+      // Ottoman returns {rows: [], meta: {}}
+      const projects = result?.rows || [];
       // Filter validated projects in memory (Ottoman has issues with ? in field names)
-      projectsThisMonth = Array.isArray(result) ? result.filter(p => p['validated?'] === true) : [];
+      projectsThisMonth = projects.filter(p => p['validated?'] === true);
       console.log('Validated projects:', projectsThisMonth.length);
     } catch (dbError) {
       console.error('Error fetching projects:', dbError.message);
@@ -102,7 +104,7 @@ router.get('/', async (req, res) => {
         ...campusFilter,
         begin_at: { $gte: monthStart }
       });
-      locationsThisMonth = Array.isArray(result) ? result : [];
+      locationsThisMonth = result?.rows || [];
     } catch (dbError) {
       console.error('Error fetching locations:', dbError.message);
       locationsThisMonth = [];
@@ -148,7 +150,7 @@ router.get('/', async (req, res) => {
     let allProjects = [];
     try {
       const result = await Project.find({ ...campusFilter });
-      allProjects = Array.isArray(result) ? result : [];
+      allProjects = result?.rows || [];
     } catch (dbError) {
       console.error('Error fetching all projects:', dbError.message);
       allProjects = [];
@@ -186,8 +188,9 @@ router.get('/', async (req, res) => {
     let allTimeWallet = [];
     try {
       const result = await Student.find(campusFilter);
-      console.log('Students found for wallet:', Array.isArray(result) ? result.length : 'not array');
-      const sorted = Array.isArray(result) ? result.sort((a, b) => (b.wallet || 0) - (a.wallet || 0)).slice(0, 10) : [];
+      const students = result?.rows || [];
+      console.log('Students found for wallet:', students.length);
+      const sorted = students.sort((a, b) => (b.wallet || 0) - (a.wallet || 0)).slice(0, 10);
       allTimeWallet = sorted;
       console.log('Top wallet students:', allTimeWallet.length);
     } catch (dbError) {
@@ -210,7 +213,8 @@ router.get('/', async (req, res) => {
     let allTimePoints = [];
     try {
       const result = await Student.find(campusFilter);
-      const sorted = Array.isArray(result) ? result.sort((a, b) => (b.correction_point || 0) - (a.correction_point || 0)).slice(0, 10) : [];
+      const students = result?.rows || [];
+      const sorted = students.sort((a, b) => (b.correction_point || 0) - (a.correction_point || 0)).slice(0, 10);
       allTimePoints = sorted;
     } catch (dbError) {
       console.error('Error fetching correction points:', dbError.message);
@@ -232,7 +236,8 @@ router.get('/', async (req, res) => {
     let allTimeLevels = [];
     try {
       const result = await Student.find(campusFilter);
-      const sorted = Array.isArray(result) ? result.sort((a, b) => (b.level || 0) - (a.level || 0)).slice(0, 10) : [];
+      const students = result?.rows || [];
+      const sorted = students.sort((a, b) => (b.level || 0) - (a.level || 0)).slice(0, 10);
       allTimeLevels = sorted;
     } catch (dbError) {
       console.error('Error fetching levels:', dbError.message);
@@ -254,12 +259,8 @@ router.get('/', async (req, res) => {
     let allStudents = [];
     try {
       const result = await Student.find(campusFilter);
-      console.log('All students found:', Array.isArray(result) ? result.length : 'not array', typeof result);
-      if (result && !Array.isArray(result)) {
-        console.log('Result keys:', Object.keys(result));
-        console.log('Result sample:', JSON.stringify(result).substring(0, 200));
-      }
-      allStudents = Array.isArray(result) ? result : [];
+      allStudents = result?.rows || [];
+      console.log('All students found:', allStudents.length);
     } catch (dbError) {
       console.error('Error fetching students for grade distribution:', dbError.message);
       allStudents = [];
@@ -283,7 +284,7 @@ router.get('/', async (req, res) => {
         ...campusFilter,
         begin_at: { $gte: sevenDaysAgo }
       });
-      recentLocations = Array.isArray(result) ? result : [];
+      recentLocations = result?.rows || [];
     } catch (dbError) {
       console.error('Error fetching recent locations:', dbError.message);
       recentLocations = [];
