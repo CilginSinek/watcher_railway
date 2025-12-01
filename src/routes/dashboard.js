@@ -102,29 +102,45 @@ router.get('/', async (req, res) => {
       });
     
     // 2. Top Location Stats (last 3 months)
-    const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
-    let locationsThisMonth = [];
+    const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const threeMonthsAgoKey = `${threeMonthsAgo.getFullYear()}-${String(threeMonthsAgo.getMonth() + 1).padStart(2, '0')}`;
+    
+    let allLocationStats = [];
     try {
-      const result = await LocationStats.find({
-        ...campusFilter,
-        begin_at: { $gte: threeMonthsAgo }
-      });
-      locationsThisMonth = result?.rows || [];
+      const result = await LocationStats.find(campusFilter);
+      allLocationStats = result?.rows || [];
+      console.log('LocationStats for top stats:', allLocationStats.length, 'found');
     } catch (dbError) {
       console.error('Error fetching locations:', dbError.message);
-      locationsThisMonth = [];
+      allLocationStats = [];
     }
     
+    // Calculate total time per student from months structure
     const timeByStudent = {};
-    locationsThisMonth.forEach(loc => {
-      const beginAt = new Date(loc.begin_at);
-      const endAt = loc.end_at ? new Date(loc.end_at) : new Date();
-      const minutes = Math.floor((endAt - beginAt) / 60000);
+    allLocationStats.forEach(locDoc => {
+      if (!locDoc.months || !locDoc.login) return;
       
-      if (!timeByStudent[loc.login]) {
-        timeByStudent[loc.login] = 0;
+      let totalMinutes = 0;
+      Object.entries(locDoc.months).forEach(([monthKey, monthData]) => {
+        // Check if month is within last 3 months
+        const monthDate = new Date(monthKey + '-01');
+        if (monthDate < threeMonthsAgo) return;
+        
+        if (monthData.days) {
+          Object.values(monthData.days).forEach(durationStr => {
+            if (!durationStr || durationStr === "00:00:00") return;
+            
+            const parts = durationStr.split(':');
+            const hours = parseInt(parts[0]) || 0;
+            const minutes = parseInt(parts[1]) || 0;
+            totalMinutes += hours * 60 + minutes;
+          });
+        }
+      });
+      
+      if (totalMinutes > 0) {
+        timeByStudent[locDoc.login] = (timeByStudent[locDoc.login] || 0) + totalMinutes;
       }
-      timeByStudent[loc.login] += minutes;
     });
     
     const topLocationStats = Object.entries(timeByStudent)
@@ -239,34 +255,67 @@ router.get('/', async (req, res) => {
     // 8. Hourly Occupancy (last 3 months average)
     let recentLocations = [];
     try {
-      const result = await LocationStats.find({
-        ...campusFilter,
-        begin_at: { $gte: threeMonthsAgo } // Use same threeMonthsAgo from topLocationStats
-      });
+      const result = await LocationStats.find(campusFilter);
       recentLocations = result?.rows || [];
+      console.log('LocationStats for occupancy:', recentLocations.length, 'found');
     } catch (dbError) {
       console.error('Error fetching recent locations:', dbError.message);
       recentLocations = [];
     }
     
-    // Track unique students per hour across all days
-    const hourlyStudents = Array(24).fill(null).map(() => new Set());
+    // Get last 3 months (YYYY-MM format)
+    const threeMonthsAgoDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     
-    recentLocations.forEach(loc => {
-      const beginAt = new Date(loc.begin_at);
-      const endAt = loc.end_at ? new Date(loc.end_at) : new Date();
+    // Track hourly and daily activity from locationstats.months structure
+    const hourlyActivity = Array(24).fill(0).map(() => ({ totalMinutes: 0, uniqueStudents: new Set() }));
+    const dailyActivity = { Mon: new Set(), Tue: new Set(), Wed: new Set(), Thu: new Set(), Fri: new Set(), Sat: new Set(), Sun: new Set() };
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    recentLocations.forEach(locDoc => {
+      if (!locDoc.months) return;
       
-      // Add student to each hour they were present
-      const startHour = beginAt.getHours();
-      const endHour = endAt.getHours();
-      
-      for (let h = startHour; h <= endHour && h < 24; h++) {
-        hourlyStudents[h].add(loc.login);
-      }
+      Object.entries(locDoc.months).forEach(([monthKey, monthData]) => {
+        // Check if month is within last 3 months
+        const monthDate = new Date(monthKey + '-01');
+        if (monthDate < threeMonthsAgoDate) return;
+        
+        if (monthData.days) {
+          Object.entries(monthData.days).forEach(([day, durationStr]) => {
+            if (!durationStr || durationStr === "00:00:00") return;
+            
+            // Parse duration "HH:MM:SS"
+            const parts = durationStr.split(':');
+            const hours = parseInt(parts[0]) || 0;
+            const minutes = parseInt(parts[1]) || 0;
+            
+            if (hours === 0 && minutes === 0) return;
+            
+            const totalMinutes = hours * 60 + minutes;
+            
+            // Add to hourly activity (distribute across hours proportionally)
+            // Assume activity spread across working hours (9-18 as estimate)
+            const activeHours = Math.min(hours, 9);
+            for (let h = 9; h < 9 + activeHours && h < 24; h++) {
+              hourlyActivity[h].totalMinutes += Math.floor(totalMinutes / activeHours);
+              hourlyActivity[h].uniqueStudents.add(locDoc.login);
+            }
+            
+            // Add to daily activity
+            const fullDate = new Date(`${monthKey}-${day.padStart(2, '0')}`);
+            if (!isNaN(fullDate.getTime())) {
+              const dayOfWeek = dayNames[fullDate.getDay()];
+              if (dailyActivity[dayOfWeek]) {
+                dailyActivity[dayOfWeek].add(locDoc.login);
+              }
+            }
+          });
+        }
+      });
     });
     
-    // Convert to average count
-    const hourlyCount = hourlyStudents.map(s => s.size);
+    // Build hourly occupancy from unique students per hour
+    const hourlyCount = hourlyActivity.map(h => h.uniqueStudents.size);
     const maxOccupancy = Math.max(...hourlyCount, 1);
     const hourlyOccupancy = hourlyCount.map((count, hour) => ({
       hour: `${String(hour).padStart(2, '0')}:00`,
@@ -275,22 +324,14 @@ router.get('/', async (req, res) => {
     }));
     
     // 9. Weekly Occupancy (last 3 months average per day)
-    const dailyStudents = { Mon: new Set(), Tue: new Set(), Wed: new Set(), Thu: new Set(), Fri: new Set(), Sat: new Set(), Sun: new Set() };
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    
-    recentLocations.forEach(loc => {
-      const day = new Date(loc.begin_at).getDay();
-      dailyStudents[dayNames[day]].add(loc.login);
-    });
-    
     const dailyCount = {
-      Mon: dailyStudents.Mon.size,
-      Tue: dailyStudents.Tue.size,
-      Wed: dailyStudents.Wed.size,
-      Thu: dailyStudents.Thu.size,
-      Fri: dailyStudents.Fri.size,
-      Sat: dailyStudents.Sat.size,
-      Sun: dailyStudents.Sun.size
+      Mon: dailyActivity.Mon.size,
+      Tue: dailyActivity.Tue.size,
+      Wed: dailyActivity.Wed.size,
+      Thu: dailyActivity.Thu.size,
+      Fri: dailyActivity.Fri.size,
+      Sat: dailyActivity.Sat.size,
+      Sun: dailyActivity.Sun.size
     };
     
     const maxWeekly = Math.max(...Object.values(dailyCount), 1);
