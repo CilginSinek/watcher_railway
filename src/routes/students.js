@@ -186,7 +186,11 @@ router.get('/:login', async (req, res) => {
       const endAt = l.end_at ? new Date(l.end_at) : new Date();
       const hours = (endAt - beginAt) / (1000 * 60 * 60);
       const day = dayNames[beginAt.getDay()];
-      dayAttendance[day].push(hours);
+      
+      // Ensure day exists in dayAttendance
+      if (dayAttendance[day]) {
+        dayAttendance[day].push(hours);
+      }
     });
     
     const attendanceDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => ({
