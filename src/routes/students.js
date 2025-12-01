@@ -133,33 +133,55 @@ router.get('/:login', async (req, res) => {
     }));
     
     // Get location stats
-    let locationStats = [];
+    let locationData = null;
     try {
       const result = await LocationStats.find({ login: validatedLogin });
-      locationStats = result?.rows || [];
+      const locationStats = result?.rows || [];
       console.log(`LocationStats for ${validatedLogin}:`, locationStats.length, 'found');
+      
       if (locationStats.length > 0) {
-        console.log('First location sample:', JSON.stringify(locationStats[0]).substring(0, 200));
-      } else {
-        console.log('No locations found, checking all locations count...');
-        const allResult = await LocationStats.find({});
-        console.log('Total locations in DB:', allResult?.rows?.length || 0);
-        if (allResult?.rows?.length > 0) {
-          console.log('Sample location structure:', JSON.stringify(allResult.rows[0]).substring(0, 300));
-        }
+        locationData = locationStats[0];
+        console.log('Location data found with', Object.keys(locationData.months || {}).length, 'months');
       }
     } catch (dbError) {
       console.error('Error fetching location stats:', dbError.message);
-      locationStats = [];
+      locationData = null;
     }
-    const locationData = locationStats.map(l => ({
-      id: l.id,
-      login: l.login,
-      begin_at: l.begin_at,
-      end_at: l.end_at,
-      campusId: l.campusId,
-      host: l.host
-    }));
+    
+    // Parse logTimes and attendanceDays from locationData
+    let logTimes = [];
+    const dayAttendance = { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] };
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    if (locationData && locationData.months) {
+      Object.entries(locationData.months).forEach(([monthKey, monthData]) => {
+        if (monthData.days) {
+          Object.entries(monthData.days).forEach(([day, durationStr]) => {
+            if (durationStr && durationStr !== "00:00:00") {
+              // Parse duration string "HH:MM:SS" to minutes
+              const parts = durationStr.split(':');
+              const hours = parseInt(parts[0]) || 0;
+              const minutes = parseInt(parts[1]) || 0;
+              const seconds = parseInt(parts[2]) || 0;
+              const totalMinutes = hours * 60 + minutes + Math.floor(seconds / 60);
+              
+              // Create date from month-day
+              const date = `${monthKey}-${day.padStart(2, '0')}`;
+              logTimes.push({ date, duration: totalMinutes });
+              
+              // Calculate day of week for attendance
+              const fullDate = new Date(`${monthKey}-${day.padStart(2, '0')}`);
+              if (!isNaN(fullDate.getTime())) {
+                const dayOfWeek = dayNames[fullDate.getDay()];
+                if (dayAttendance[dayOfWeek]) {
+                  dayAttendance[dayOfWeek].push(hours + minutes / 60);
+                }
+              }
+            }
+          });
+        }
+      });
+    }
     
     // Get feedbacks and calculate averages
     let feedbacks = [];
@@ -177,41 +199,7 @@ router.get('/:login', async (req, res) => {
       ? feedbacks.reduce((sum, f) => sum + (f.rating || 0), 0) / feedbackCount 
       : 0;
     
-    // Calculate logTimes (location history with duration)
-    const logTimes = locationStats.map(l => {
-      if (!l.begin_at) return { date: null, duration: 0 };
-      
-      const beginAt = new Date(l.begin_at);
-      const endAt = l.end_at ? new Date(l.end_at) : new Date();
-      
-      // Check for valid dates
-      if (isNaN(beginAt.getTime()) || isNaN(endAt.getTime())) {
-        return { date: l.begin_at, duration: 0 };
-      }
-      
-      const duration = Math.floor((endAt - beginAt) / 60000); // minutes
-      return {
-        date: l.begin_at,
-        duration: duration > 0 ? duration : 0
-      };
-    });
-    
-    // Calculate attendanceDays (average hours per day of week)
-    const dayAttendance = { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] };
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    
-    locationStats.forEach(l => {
-      const beginAt = new Date(l.begin_at);
-      const endAt = l.end_at ? new Date(l.end_at) : new Date();
-      const hours = (endAt - beginAt) / (1000 * 60 * 60);
-      const day = dayNames[beginAt.getDay()];
-      
-      // Ensure day exists in dayAttendance
-      if (dayAttendance[day]) {
-        dayAttendance[day].push(hours);
-      }
-    });
-    
+    // Calculate attendanceDays from parsed data
     const attendanceDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => ({
       day,
       avgHours: dayAttendance[day].length > 0 
