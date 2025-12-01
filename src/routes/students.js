@@ -381,158 +381,128 @@ router.get('/', async (req, res) => {
     
     const total = filteredStudents.length;
     
-    // For calculated fields, we need a two-pass approach:
-    // 1. If NOT sorting by calculated field: paginate first, then calculate only for page
-    // 2. If sorting by calculated field: calculate for all, sort, then paginate
-    const needsCalculations = [
+    // Sort in-memory by basic fields (much faster than DB sort)
+    const isCalculatedField = [
       'project_count', 'cheat_count', 'godfather_count', 
       'children_count', 'log_time', 'evo_performance', 
       'feedback_count', 'avg_rating'
     ].includes(validatedSort);
     
-    let studentsToEnrich = needsCalculations 
-      ? filteredStudents  // Need all students to sort correctly
-      : filteredStudents.slice(validatedSkip, validatedSkip + validatedLimit); // Only current page
-    
-    let enrichedStudents = studentsToEnrich;
-    
-    if (needsCalculations || studentsToEnrich.length > 0) {
-      // Fetch related data ONLY for students we're enriching
-      const studentLogins = studentsToEnrich.map(s => s.login);
-      let projectsByLogin = {};
-      let cheatsByLogin = {};
-      let feedbacksByLogin = {};
-      let patronageByLogin = {};
-      let locationsByLogin = {};
-      
-      if (studentLogins.length > 0) {
-        try {
-          // Fetch data using individual queries per student to avoid fetching entire collections
-          const projectsPromises = studentLogins.map(login => 
-            Project.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-          );
-          const feedbacksPromises = studentLogins.map(login => 
-            Feedback.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-          );
-          const patronagesPromises = studentLogins.map(login => 
-            Patronage.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-          );
-          const locationsPromises = studentLogins.map(login => 
-            LocationStats.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
-          );
-          
-          const [projectsResults, feedbacksResults, patronagesResults, locationsResults] = await Promise.all([
-            Promise.all(projectsPromises),
-            Promise.all(feedbacksPromises),
-            Promise.all(patronagesPromises),
-            Promise.all(locationsPromises)
-          ]);
-          
-          // Build lookup maps from results
-          studentLogins.forEach((login, idx) => {
-            const projects = projectsResults[idx]?.rows || [];
-            const feedbacks = feedbacksResults[idx]?.rows || [];
-            const patronages = patronagesResults[idx]?.rows || [];
-            const locations = locationsResults[idx]?.rows || [];
-            
-            if (projects.length > 0) {
-              projectsByLogin[login] = projects;
-              cheatsByLogin[login] = projects.filter(p => p.score === -42).length;
-            }
-            if (feedbacks.length > 0) feedbacksByLogin[login] = feedbacks;
-            if (patronages.length > 0) patronageByLogin[login] = patronages[0];
-            if (locations.length > 0) locationsByLogin[login] = locations[0];
-          });
-        } catch (dbError) {
-          console.error('Error fetching related data:', dbError.message);
-        }
-      }
-      
-      // Enrich with calculations
-      enrichedStudents = studentsToEnrich.map(s => {
-        const projects = projectsByLogin[s.login] || [];
-        const feedbacks = feedbacksByLogin[s.login] || [];
-        const patronage = patronageByLogin[s.login];
-        const location = locationsByLogin[s.login];
-        
-        const project_count = projects.length;
-        const cheat_count = cheatsByLogin[s.login] || 0;
-        const feedback_count = feedbacks.length;
-        const avg_rating = feedback_count > 0 
-          ? feedbacks.reduce((sum, f) => sum + (f.rating || 0), 0) / feedback_count 
-          : 0;
-        
-        const godfather_count = patronage?.godfathers?.length || 0;
-        const children_count = patronage?.children?.length || 0;
-        
-        let log_time = 0;
-        if (location && location.months) {
-          const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-          Object.entries(location.months).forEach(([monthKey, monthData]) => {
-            const monthDate = new Date(monthKey + '-01');
-            if (monthDate >= threeMonthsAgo && monthData.days) {
-              Object.values(monthData.days).forEach(durationStr => {
-                if (durationStr && durationStr !== "00:00:00") {
-                  const parts = durationStr.split(':');
-                  const hours = parseInt(parts[0]) || 0;
-                  const minutes = parseInt(parts[1]) || 0;
-                  log_time += hours * 60 + minutes;
-                }
-              });
-            }
-          });
-        }
-        
-        const evo_performance = (project_count * 10) + (avg_rating * 5) - (cheat_count * 20);
-        
-        return {
-          ...s,
-          project_count,
-          cheat_count,
-          feedback_count,
-          avg_rating,
-          godfather_count,
-          children_count,
-          log_time,
-          evo_performance
-        };
-      });
-    }
-    
-    // Sort if needed
-    if (needsCalculations) {
-      enrichedStudents.sort((a, b) => {
+    // If NOT sorting by calculated fields, sort now and paginate
+    if (!isCalculatedField) {
+      filteredStudents.sort((a, b) => {
         let aVal = a[validatedSort];
         let bVal = b[validatedSort];
         
-        // Handle null/undefined
         if (aVal === null || aVal === undefined) aVal = typeof bVal === 'number' ? -Infinity : '';
         if (bVal === null || bVal === undefined) bVal = typeof aVal === 'number' ? -Infinity : '';
         
-        // String comparison (case-insensitive)
         if (typeof aVal === 'string') {
           aVal = aVal.toLowerCase();
           bVal = (bVal || '').toString().toLowerCase();
         }
         
-        // Number comparison
         if (typeof aVal === 'number' && typeof bVal === 'number') {
           return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
         }
         
-        // Default comparison
-        if (validatedOrder === 'asc') {
-          return aVal > bVal ? 1 : -1;
-        } else {
-          return aVal < bVal ? 1 : -1;
-        }
+        return validatedOrder === 'asc' ? (aVal > bVal ? 1 : -1) : (aVal < bVal ? 1 : -1);
       });
     }
     
-    // Paginate (validated limit and skip)
-    const students = enrichedStudents
-      .slice(validatedSkip, validatedSkip + validatedLimit)
-      .map(s => ({
+    // Paginate FIRST - only get students for current page
+    const paginatedStudents = filteredStudents.slice(validatedSkip, validatedSkip + validatedLimit);
+    
+    // Only enrich the paginated students (20-50 students max)
+    const studentLogins = paginatedStudents.map(s => s.login);
+    let enrichedStudents = paginatedStudents;
+    
+    // Only fetch related data if we have students to enrich
+    if (studentLogins.length > 0) {
+      try {
+        // Fetch in parallel for all students on this page
+        const [projectsResults, feedbacksResults, patronagesResults, locationsResults] = await Promise.all([
+          Promise.all(studentLogins.map(login => 
+            Project.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+          )),
+          Promise.all(studentLogins.map(login => 
+            Feedback.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+          )),
+          Promise.all(studentLogins.map(login => 
+            Patronage.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+          )),
+          Promise.all(studentLogins.map(login => 
+            LocationStats.find({ login, ...(validatedCampusId !== null && { campusId: validatedCampusId }) })
+          ))
+        ]);
+        
+        // Enrich students with calculated data
+        enrichedStudents = paginatedStudents.map((s, idx) => {
+          const projects = projectsResults[idx]?.rows || [];
+          const feedbacks = feedbacksResults[idx]?.rows || [];
+          const patronage = (patronagesResults[idx]?.rows || [])[0];
+          const location = (locationsResults[idx]?.rows || [])[0];
+          
+          const project_count = projects.length;
+          const cheat_count = projects.filter(p => p.score === -42).length;
+          const feedback_count = feedbacks.length;
+          const avg_rating = feedback_count > 0 
+            ? feedbacks.reduce((sum, f) => sum + (f.rating || 0), 0) / feedback_count 
+            : 0;
+          
+          const godfather_count = patronage?.godfathers?.length || 0;
+          const children_count = patronage?.children?.length || 0;
+          
+          let log_time = 0;
+          if (location?.months) {
+            const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+            Object.entries(location.months).forEach(([monthKey, monthData]) => {
+              const monthDate = new Date(monthKey + '-01');
+              if (monthDate >= threeMonthsAgo && monthData.days) {
+                Object.values(monthData.days).forEach(durationStr => {
+                  if (durationStr && durationStr !== "00:00:00") {
+                    const [hours = 0, minutes = 0] = durationStr.split(':').map(Number);
+                    log_time += hours * 60 + minutes;
+                  }
+                });
+              }
+            });
+          }
+          
+          const evo_performance = (project_count * 10) + (avg_rating * 5) - (cheat_count * 20);
+          
+          return {
+            ...s,
+            project_count,
+            cheat_count,
+            feedback_count,
+            avg_rating,
+            godfather_count,
+            children_count,
+            log_time,
+            evo_performance
+          };
+        });
+      } catch (dbError) {
+        console.error('Error fetching related data:', dbError.message);
+      }
+    }
+    
+    // If sorting by calculated field, sort AFTER enrichment
+    if (isCalculatedField) {
+      enrichedStudents.sort((a, b) => {
+        let aVal = a[validatedSort];
+        let bVal = b[validatedSort];
+        
+        if (aVal === null || aVal === undefined) aVal = -Infinity;
+        if (bVal === null || bVal === undefined) bVal = -Infinity;
+        
+        return validatedOrder === 'asc' ? aVal - bVal : bVal - aVal;
+      });
+    }
+    
+    // Map to response format
+    const students = enrichedStudents.map(s => ({
         id: s.id,
         login: s.login,
         email: s.email,
