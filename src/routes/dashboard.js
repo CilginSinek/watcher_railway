@@ -97,7 +97,7 @@ router.get('/', async (req, res) => {
     
     // 6. Grade Distribution
     const gradeDistributionQuery = `
-      SELECT s.grade as name, COUNT(*) as value
+      SELECT s.grade as name, COUNT(*) as \`value\`
       FROM product._default.students s
       WHERE s.type = 'Student' 
         AND s.\`active?\` = true 
