@@ -188,7 +188,7 @@ async function projectcheatsort(
       s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
       s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
       s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
-      s.is_trans, s.is_test, s.level, s.type, s.createdAt, s.updatedAt,
+      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
       IFMISSING((SELECT VALUE COUNT(1) FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')[0], 0) as cheat_count,
       (SELECT RAW p FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
