@@ -618,7 +618,7 @@ async function logtimesort(
   const n1qlQuery = `
     WITH student_logtimes AS (
       SELECT s.*, 
-        (SELECT SUM(
+        (SELECT RAW SUM(
           TONUMBER(SUBSTR(m.totalDuration, 0, 2)) * 3600 +
           TONUMBER(SUBSTR(m.totalDuration, 3, 2)) * 60 +
           TONUMBER(SUBSTR(m.totalDuration, 6, 2))
