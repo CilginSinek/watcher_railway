@@ -713,7 +713,7 @@ async function feedbackcountsort(
   }
   if (search) {
     const searchPattern = search.toLowerCase();
-    studentFilters.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+    studentFilters.push(`(LOWER(s.first_name) LIKE '%${searchPattern}%' OR LOWER(s.displayname) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
   }
   
   switch (status) {
@@ -754,29 +754,36 @@ async function feedbackcountsort(
   
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
   const campusFilter = campusId ? `AND f.campusId = ${campusId}` : "";
+  const cheatCampusFilter = campusId ? `AND p.campusId = ${campusId}` : "";
   
+  // Subquery approach - daha performanslı ve güvenilir
   const n1qlQuery = `
-    SELECT s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
-      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
-      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
-      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
-      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
-      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-      COUNT(f.evaluated) as feedback_count,
-      CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
+    SELECT s.*,
+      IFNULL(
+        (SELECT RAW COUNT(*)
+         FROM product._default.feedbacks f
+         WHERE f.type = 'Feedback'
+           AND f.evaluated = s.login
+           ${campusFilter}
+        )[0],
+        0
+      ) as feedback_count,
+      EXISTS(
+        SELECT 1 
+        FROM product._default.projects p 
+        WHERE p.type = 'Project' 
+          AND p.login = s.login 
+          AND p.score = -42
+          ${cheatCampusFilter}
+        LIMIT 1
+      ) as has_cheat
     FROM product._default.students s
-    LEFT JOIN product._default.feedbacks f ON f.evaluated = s.login AND f.type = 'Feedback' ${campusFilter}
-    LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
     WHERE s.type = 'Student' ${studentWhere}
-    GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
-      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
-      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
-      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
-      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
-      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt
     ORDER BY feedback_count ${order === "asc" ? "ASC" : "DESC"}
     LIMIT ${limit} OFFSET ${skip}
   `;
+  
+  console.log('[feedbackcountsort] Query:', n1qlQuery);
   
   const countQuery = `
     SELECT COUNT(*) as total
@@ -788,6 +795,18 @@ async function feedbackcountsort(
     cluster.query(n1qlQuery),
     cluster.query(countQuery)
   ]);
+  
+  console.log('[feedbackcountsort] First 3 results:', 
+    JSON.stringify(
+      queryResult.rows.slice(0, 3).map(s => ({
+        login: s.login, 
+        feedback_count: s.feedback_count,
+        has_cheat: s.has_cheat
+      })), 
+      null, 
+      2
+    )
+  );
   
   const students = queryResult.rows;
   const total = countResult.rows[0]?.total || 0;
