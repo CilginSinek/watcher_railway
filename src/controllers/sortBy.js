@@ -753,14 +753,27 @@ async function feedbackcountsort(
   }
   
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
-  const campusFilter = campusId ? `f.campusId = ${campusId} AND` : "";
+  const campusFilter = campusId ? `AND f.campusId = ${campusId}` : "";
   
   const n1qlQuery = `
-    SELECT s.*,
-      IFMISSING((SELECT VALUE COUNT(1) FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.type = 'Feedback')[0], 0) as feedback_count,
-      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
+    SELECT s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
+      COUNT(f.login) as feedback_count,
+      CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
     FROM product._default.students s
+    LEFT JOIN product._default.feedbacks f ON f.login = s.login AND f.type = 'Feedback' ${campusFilter}
+    LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
     WHERE s.type = 'Student' ${studentWhere}
+    GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt
     ORDER BY feedback_count ${order === "asc" ? "ASC" : "DESC"}
     LIMIT ${limit} OFFSET ${skip}
   `;
@@ -851,15 +864,28 @@ async function averageratesort(
   }
   
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
-  const campusFilter = campusId ? `f.campusId = ${campusId} AND` : "";
+  const campusFilter = campusId ? `AND f.campusId = ${campusId}` : "";
   
   const n1qlQuery = `
-    SELECT s.*,
-      (SELECT AVG(f.rating) FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.rating IS NOT NULL AND f.type = 'Feedback')[0] as avg_rating,
-      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
+    SELECT s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
+      AVG(f.rating) as avg_rating,
+      CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
     FROM product._default.students s
+    LEFT JOIN product._default.feedbacks f ON f.login = s.login AND f.type = 'Feedback' AND f.rating IS NOT NULL ${campusFilter}
+    LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
     WHERE s.type = 'Student' ${studentWhere}
-    ORDER BY avg_rating ${order === "asc" ? "ASC" : "DESC"}
+    GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt
+    ORDER BY avg_rating ${order === "asc" ? "ASC NULLS FIRST" : "DESC NULLS LAST"}
     LIMIT ${limit} OFFSET ${skip}
   `;
   
