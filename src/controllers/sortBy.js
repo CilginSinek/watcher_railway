@@ -614,32 +614,14 @@ async function logtimesort(
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
   const campusFilter = campusId ? `AND l.campusId = ${campusId}` : "";
   
+  // Get students with their locationstats data
   const n1qlQuery = `
-    SELECT s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
-      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
-      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
-      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
-      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
-      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-      IFNULL(SUM(
-        TONUMBER(SUBSTR(m.totalDuration, 0, 2)) * 3600 +
-        TONUMBER(SUBSTR(m.totalDuration, 3, 2)) * 60 +
-        TONUMBER(SUBSTR(m.totalDuration, 6, 2))
-      ), 0) as log_time,
-      CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
+    SELECT s.*, 
+      (SELECT RAW l FROM product._default.locationstats l 
+       WHERE l.login = s.login AND l.type = 'LocationStats' ${campusFilter} LIMIT 1)[0] as locationstats,
+      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
-    LEFT JOIN product._default.locationstats l ON l.login = s.login AND l.type = 'LocationStats' ${campusFilter}
-    LEFT JOIN OBJECT_NAMES(l.months) AS mn ON true
-    LET m = l.months[mn]
-    LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
     WHERE s.type = 'Student' ${studentWhere}
-    GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
-      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
-      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
-      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
-      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
-      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt
-    ORDER BY log_time ${order === "asc" ? "ASC" : "DESC"}
     LIMIT ${limit} OFFSET ${skip}
   `;
   
@@ -656,9 +638,30 @@ async function logtimesort(
     cluster.query(countQuery)
   ]);
   
-  console.log('[logtimesort] First 3 results:', JSON.stringify(queryResult.rows.slice(0, 3), null, 2));
+  // Calculate log_time in JavaScript
+  const students = queryResult.rows.map(student => {
+    let log_time = 0;
+    if (student.locationstats && student.locationstats.months) {
+      for (const monthKey in student.locationstats.months) {
+        const month = student.locationstats.months[monthKey];
+        if (month.totalDuration && month.totalDuration !== "00:00:00") {
+          const parts = month.totalDuration.split(':');
+          if (parts.length === 3) {
+            log_time += parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+          }
+        }
+      }
+    }
+    delete student.locationstats; // Remove temporary field
+    student.log_time = log_time;
+    return student;
+  });
   
-  const students = queryResult.rows;
+  // Sort by log_time
+  students.sort((a, b) => order === "asc" ? a.log_time - b.log_time : b.log_time - a.log_time);
+  
+  console.log('[logtimesort] First 3 results:', JSON.stringify(students.slice(0, 3).map(s => ({login: s.login, log_time: s.log_time})), null, 2));
+  
   const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
