@@ -37,33 +37,44 @@ router.get('/', async (req, res) => {
     const campusWhere = validatedCampusId !== null ? `AND s.campusId = ${validatedCampusId}` : '';
     const campusWhereP = validatedCampusId !== null ? `AND p.campusId = ${validatedCampusId}` : '';
     
-    // 1. Top Project Submitters (current month) - N1QL GROUP BY
+    // 1. Top Project Submitters (current month) - Optimized with subquery
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const topProjectSubmittersQuery = `
-      SELECT p.login, 
-        COUNT(*) as projectCount,
-        SUM(p.score) as totalScore,
-        s.id, s.displayname, s.image
-      FROM product._default.projects p
-      INNER JOIN product._default.students s ON s.login = p.login AND s.type = 'Student'
-      WHERE p.type = 'Project' 
-        AND p.status = 'finished'
-        AND p.date >= '${monthStart}'
-        ${campusWhereP}
-      GROUP BY p.login, s.id, s.displayname, s.image
+      SELECT login, projectCount, totalScore,
+        (SELECT s.id FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as id,
+        (SELECT s.displayname FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as displayname,
+        (SELECT s.image FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as image
+      FROM (
+        SELECT p.login, 
+          COUNT(*) as projectCount,
+          SUM(p.score) as totalScore
+        FROM product._default.projects p
+        USE INDEX (idx_projects_dashboard USING GSI)
+        WHERE p.type = 'Project' 
+          AND p.status = 'finished'
+          AND p.date >= '${monthStart}'
+          ${campusWhereP}
+        GROUP BY p.login
+      ) AS agg
       ORDER BY projectCount DESC
       LIMIT 10
     `;
     
-    // 2. All Time Projects - N1QL GROUP BY
+    // 2. All Time Projects - Optimized with subquery
     const allTimeProjectsQuery = `
-      SELECT p.login,
-        COUNT(*) as projectCount,
-        s.id, s.displayname, s.image, s.correction_point, s.wallet
-      FROM product._default.projects p
-      INNER JOIN product._default.students s ON s.login = p.login AND s.type = 'Student'
-      WHERE p.type = 'Project' ${campusWhereP}
-      GROUP BY p.login, s.id, s.displayname, s.image, s.correction_point, s.wallet
+      SELECT login, projectCount,
+        (SELECT s.id FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as id,
+        (SELECT s.displayname FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as displayname,
+        (SELECT s.image FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as image,
+        (SELECT s.correction_point FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as correction_point,
+        (SELECT s.wallet FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as wallet
+      FROM (
+        SELECT p.login, COUNT(*) as projectCount
+        FROM product._default.projects p
+        USE INDEX (idx_projects_dashboard USING GSI)
+        WHERE p.type = 'Project' ${campusWhereP}
+        GROUP BY p.login
+      ) AS agg
       ORDER BY projectCount DESC
       LIMIT 10
     `;
@@ -72,6 +83,7 @@ router.get('/', async (req, res) => {
     const allTimeWalletQuery = `
       SELECT s.id, s.login, s.displayname, s.image, s.correction_point, s.wallet
       FROM product._default.students s
+      USE INDEX (idx_students_wallet USING GSI)
       WHERE s.type = 'Student' ${campusWhere}
       ORDER BY s.wallet DESC
       LIMIT 10
@@ -81,6 +93,7 @@ router.get('/', async (req, res) => {
     const allTimePointsQuery = `
       SELECT s.id, s.login, s.displayname, s.image, s.correction_point, s.wallet
       FROM product._default.students s
+      USE INDEX (idx_students_correction USING GSI)
       WHERE s.type = 'Student' ${campusWhere}
       ORDER BY s.correction_point DESC
       LIMIT 10
@@ -90,6 +103,7 @@ router.get('/', async (req, res) => {
     const allTimeLevelsQuery = `
       SELECT s.id, s.login, s.displayname, s.image, s.correction_point, s.wallet, s.\`level\`
       FROM product._default.students s
+      USE INDEX (idx_students_level USING GSI)
       WHERE s.type = 'Student' ${campusWhere}
       ORDER BY s.\`level\` DESC
       LIMIT 10
@@ -99,6 +113,7 @@ router.get('/', async (req, res) => {
     const gradeDistributionQuery = `
       SELECT s.grade as name, COUNT(*) as \`value\`
       FROM product._default.students s
+      USE INDEX (idx_students_grade USING GSI)
       WHERE s.type = 'Student' 
         AND s.\`active?\` = true 
         AND s.\`staff?\` != true
