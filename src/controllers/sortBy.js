@@ -182,7 +182,13 @@ async function projectcheatsort(
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
   
   const n1qlQuery = `
-    SELECT s.*,
+    SELECT 
+      s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+      s.is_trans, s.is_test, s.level, s.type, s.createdAt, s.updatedAt,
       IFMISSING((SELECT VALUE COUNT(1) FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')[0], 0) as cheat_count,
       (SELECT RAW p FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
@@ -206,7 +212,7 @@ async function projectcheatsort(
     cluster.query(countQuery)
   ]);
   
-  console.log('[projectcheatsort] Query result sample:', queryResult.rows[0]);
+  console.log('[projectcheatsort] Query result sample:', JSON.stringify(queryResult.rows[0], null, 2));
   console.log('[projectcheatsort] First student cheat_count:', queryResult.rows[0]?.cheat_count);
   console.log('[projectcheatsort] First student has_cheats length:', queryResult.rows[0]?.has_cheats?.length);
   
