@@ -256,7 +256,7 @@ router.get("/", async (req, res) => {
     try {
       validatedCampusId = validateCampusId(req.query.campusId);
       validatedSearch = validateSearch(req.query.search);
-      validatedPool = validatePool(req.query.pool);
+      validatedPool = validatePool(req.query.poolYear, req.query.poolMonth);
       validatedStatus = validateStatus(req.query.status);
       validatedSort = validateSort(req.query.sortBy);
       validatedOrder = validateOrder(req.query.order);

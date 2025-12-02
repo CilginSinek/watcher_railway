@@ -66,17 +66,14 @@ function validateSearch(search) {
  * @param {string} pool - Pool in format "month-year"
  * @returns {object|null} - {month, year} or null
  */
-function validatePool(pool) {
-  if (!pool || typeof pool !== 'string') {
-    return null;
+function validatePool(year, month) {
+  if (!month || typeof month !== 'string') {
+    throw new Error('Invalid pool month: must be a non-empty string');
   }
   
-  const parts = pool.split('-');
-  if (parts.length !== 2) {
-    throw new Error('Invalid pool format: must be "month-year"');
+  if (!year || typeof year !== 'string') {
+    throw new Error('Invalid pool year: must be a non-empty string');
   }
-  
-  const [month, year] = parts;
   
   // Validate month (lowercase month name or number)
   const validMonths = [
@@ -95,7 +92,7 @@ function validatePool(pool) {
     throw new Error('Invalid pool year: must be between 2000-2100');
   }
   
-  return { month: monthLower, year };
+  return { pool_month: monthLower, pool_year: year };
 }
 
 /**
