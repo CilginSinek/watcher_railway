@@ -183,7 +183,7 @@ async function projectcheatsort(
   
   const n1qlQuery = `
     SELECT s.*,
-      (SELECT COUNT(*) FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')[0] as cheat_count,
+      (SELECT COUNT(1) as cnt FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')[0].cnt as cheat_count,
       (SELECT RAW p FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
@@ -282,7 +282,7 @@ async function projectcountsort(
   
   const n1qlQuery = `
     SELECT s.*,
-      (SELECT COUNT(*) FROM product._default.projects p WHERE p.login = s.login AND p.status = 'success' AND p.type = 'Project')[0] as project_count
+      (SELECT COUNT(1) as cnt FROM product._default.projects p WHERE p.login = s.login AND p.status = 'success' AND p.type = 'Project')[0].cnt as project_count
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
     ORDER BY project_count ${order === "asc" ? "ASC" : "DESC"}
@@ -477,8 +477,8 @@ async function familybasesort(
     
     const n1qlQuery = `
         SELECT s.*,
-            (SELECT COUNT(*) FROM product._default.patronages p UNNEST p.children c WHERE c.login = s.login AND p.type = 'Patronage')[0] as godfather_count,
-            (SELECT COUNT(*) FROM product._default.patronages p UNNEST p.godfathers g WHERE g.login = s.login AND p.type = 'Patronage')[0] as children_count
+            (SELECT COUNT(1) as cnt FROM product._default.patronages p UNNEST p.children c WHERE c.login = s.login AND p.type = 'Patronage')[0].cnt as godfather_count,
+            (SELECT COUNT(1) as cnt FROM product._default.patronages p UNNEST p.godfathers g WHERE g.login = s.login AND p.type = 'Patronage')[0].cnt as children_count
         FROM product._default.students s
         WHERE s.type = 'Student' ${studentWhere}
         ORDER BY ${sorttype} ${order === "asc" ? "ASC" : "DESC"}
@@ -680,7 +680,7 @@ async function feedbackcountsort(
   
   const n1qlQuery = `
     SELECT s.*,
-      (SELECT COUNT(*) FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.type = 'Feedback')[0] as feedback_count
+      (SELECT COUNT(1) as cnt FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.type = 'Feedback')[0].cnt as feedback_count
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
     ORDER BY feedback_count ${order === "asc" ? "ASC" : "DESC"}
