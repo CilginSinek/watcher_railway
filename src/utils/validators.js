@@ -97,7 +97,7 @@ function validatePool(year, month) {
     throw new Error('Invalid pool year: must be between 2000-2100');
   }
   
-  return { pool_month: monthLower, pool_year: year };
+  return { month: monthLower, year: year };
 }
 
 /**
