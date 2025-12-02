@@ -753,31 +753,28 @@ async function feedbackcountsort(
   }
   
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
-  const campusFilter = campusId ? `AND f.campusId = ${campusId}` : "";
-  const cheatCampusFilter = campusId ? `AND p.campusId = ${campusId}` : "";
+  const campusFilter = campusId ? `f.campusId = ${campusId} AND` : "";
+  const cheatCampusFilter = campusId ? `p.campusId = ${campusId} AND` : "";
   
-  // Subquery approach - daha performanslı ve güvenilir
+  // 2 adımlı yaklaşım: Önce aggregate, sonra join
   const n1qlQuery = `
+    WITH feedback_counts AS (
+      SELECT f.evaluated as login, COUNT(*) as count
+      FROM product._default.feedbacks f
+      WHERE ${campusFilter} f.type = 'Feedback'
+      GROUP BY f.evaluated
+    ),
+    cheat_checks AS (
+      SELECT DISTINCT p.login
+      FROM product._default.projects p
+      WHERE ${cheatCampusFilter} p.type = 'Project' AND p.score = -42
+    )
     SELECT s.*,
-      IFNULL(
-        (SELECT RAW COUNT(*)
-         FROM product._default.feedbacks f
-         WHERE f.type = 'Feedback'
-           AND f.evaluated = s.login
-           ${campusFilter}
-        )[0],
-        0
-      ) as feedback_count,
-      EXISTS(
-        SELECT 1 
-        FROM product._default.projects p 
-        WHERE p.type = 'Project' 
-          AND p.login = s.login 
-          AND p.score = -42
-          ${cheatCampusFilter}
-        LIMIT 1
-      ) as has_cheat
+      IFNULL(fc.count, 0) as feedback_count,
+      CASE WHEN cc.login IS NOT NULL THEN true ELSE false END as has_cheat
     FROM product._default.students s
+    LEFT JOIN feedback_counts fc ON fc.login = s.login
+    LEFT JOIN cheat_checks cc ON cc.login = s.login
     WHERE s.type = 'Student' ${studentWhere}
     ORDER BY feedback_count ${order === "asc" ? "ASC" : "DESC"}
     LIMIT ${limit} OFFSET ${skip}
