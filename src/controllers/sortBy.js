@@ -1,5 +1,5 @@
-const { Student, Project, LocationStats, Feedback } = require("../models");
-const { Patronage } = require("../models");
+const { Student, Project, LocationStats, Feedback, Patronage } = require("../models");
+const { getDefaultInstance } = require("ottoman");
 
 /**
  * @param {number|null} campusId - Campus ID or null
@@ -25,112 +25,92 @@ async function loginbasesort(
   sorttype
 ) {
   const skip = (page - 1) * limit;
+  const cluster = getDefaultInstance().cluster;
 
-  const baseQuery = {
-    ...(campusId && { campusId }),
-    ...(pool && { pool_month: pool.month, pool_year: pool.year }),
-    $or: [
-      { name: { $regex: search, $options: "i" } },
-      { displayName: { $regex: search, $options: "i" } },
-      { login: { $regex: search, $options: "i" } },
-    ],
-  };
-
-  // Add status filter to base query instead of separate matches
-  const statusQuery = {};
+  // Build WHERE conditions
+  let whereConditions = ["s.type = 'Student'"];
+  
+  if (campusId) {
+    whereConditions.push(`s.campusId = ${campusId}`);
+  }
+  
+  if (pool) {
+    whereConditions.push(`s.pool_month = '${pool.month}'`);
+    whereConditions.push(`s.pool_year = '${pool.year}'`);
+  }
+  
+  if (search) {
+    const searchPattern = search.toLowerCase();
+    whereConditions.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+  }
+  
+  // Add status filter
   switch (status) {
     case "active":
-      statusQuery["active?"] = true;
+      whereConditions.push("s.`active?` = true");
       break;
     case "inactive":
-      statusQuery["active?"] = false;
+      whereConditions.push("s.`active?` = false");
       break;
     case "test":
-      statusQuery.is_test = true;
+      whereConditions.push("s.is_test = true");
       break;
     case "alumni":
-      statusQuery["alumni?"] = true;
+      whereConditions.push("s.`alumni?` = true");
       break;
     case "staff":
-      statusQuery["staff?"] = true;
+      whereConditions.push("s.`staff?` = true");
       break;
     case "blackholed":
-      statusQuery.blackholed = true;
+      whereConditions.push("s.blackholed = true");
       break;
     case "transcender":
-      statusQuery.grade = "transcender";
+      whereConditions.push("s.grade = 'transcender'");
       break;
     case "cadet":
-      statusQuery.grade = "cadet";
+      whereConditions.push("s.grade = 'cadet'");
       break;
     case "piscine":
-      statusQuery.grade = "piscine";
-      statusQuery["active?"] = true;
+      whereConditions.push("s.grade = 'piscine' AND s.`active?` = true");
       break;
     case "sinker":
-      statusQuery.sinker = true;
+      whereConditions.push("s.sinker = true");
       break;
     case "freeze":
-      statusQuery.freeze = true;
+      whereConditions.push("s.freeze = true");
       break;
   }
-
-  const aggregatePipeline = [
-    {
-      $match: {
-        ...baseQuery,
-        ...statusQuery,
-      },
-    },
-    // Use $expr with $in for better performance
-    {
-      $lookup: {
-        from: "projects",
-        let: { studentLogin: "$login" },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ["$login", "$$studentLogin"] },
-                  { $eq: ["$score", -42] },
-                ],
-              },
-            },
-          },
-          { $limit: 1 },
-        ],
-        as: "has_cheats",
-      },
-    },
-    {
-      $addFields: {
-        hasFailedProject: { $gt: [{ $size: "$has_cheats" }, 0] },
-      },
-    },
-    { $sort: { [sorttype]: order == "asc" ? 1 : -1 } },
-    { $skip: skip },
-    { $limit: limit },
-  ];
-
-  const [studentsResult, totalResult] = await Promise.all([
-    Student.aggregate(aggregatePipeline),
-    Student.aggregate([
-      {
-        $match: {
-          ...baseQuery,
-          ...statusQuery,
-        },
-      },
-      { $count: "total" },
-    ]),
+  
+  const whereClause = whereConditions.join(" AND ");
+  
+  // Main query with cheat check
+  const n1qlQuery = `
+    SELECT s.*, 
+      (SELECT RAW p FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project' LIMIT 1)[0] IS NOT NULL as hasFailedProject
+    FROM product._default.students s
+    WHERE ${whereClause}
+    ORDER BY s.${sorttype} ${order === "asc" ? "ASC" : "DESC"}
+    LIMIT ${limit} OFFSET ${skip}
+  `;
+  
+  // Count query
+  const countQuery = `
+    SELECT COUNT(*) as total
+    FROM product._default.students s
+    WHERE ${whereClause}
+  `;
+  
+  const [queryResult, countResult] = await Promise.all([
+    cluster.query(n1qlQuery),
+    cluster.query(countQuery)
   ]);
-
-  const total = totalResult[0]?.total || 0;
+  
+  const students = queryResult.rows;
+  const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
   return {
-    students: studentsResult,
+    students,
     pagination: {
       total,
       page,
@@ -150,141 +130,87 @@ async function projectcheatsort(
   page
 ) {
   const skip = (page - 1) * limit;
-  const baseQuery = {
-    ...(campusId && { campusId }),
-    ...(pool && { pool_month: pool.month, pool_year: pool.year }),
-    $or: [
-      { name: { $regex: search, $options: "i" } },
-      { displayName: { $regex: search, $options: "i" } },
-      { login: { $regex: search, $options: "i" } },
-    ],
-  };
-  const statusQuery = {};
+  const cluster = getDefaultInstance().cluster;
+
+  // Build student filter
+  let studentFilters = [];
+  if (campusId) studentFilters.push(`s.campusId = ${campusId}`);
+  if (pool) {
+    studentFilters.push(`s.pool_month = '${pool.month}'`);
+    studentFilters.push(`s.pool_year = '${pool.year}'`);
+  }
+  if (search) {
+    const searchPattern = search.toLowerCase();
+    studentFilters.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+  }
+  
   switch (status) {
     case "active":
-      statusQuery["active?"] = true;
+      studentFilters.push("s.`active?` = true");
       break;
     case "inactive":
-      statusQuery["active?"] = false;
+      studentFilters.push("s.`active?` = false");
       break;
     case "test":
-      statusQuery.is_test = true;
+      studentFilters.push("s.is_test = true");
       break;
     case "alumni":
-      statusQuery["alumni?"] = true;
+      studentFilters.push("s.`alumni?` = true");
       break;
     case "staff":
-      statusQuery["staff?"] = true;
+      studentFilters.push("s.`staff?` = true");
       break;
     case "blackholed":
-      statusQuery.blackholed = true;
+      studentFilters.push("s.blackholed = true");
       break;
     case "transcender":
-      statusQuery.grade = "transcender";
+      studentFilters.push("s.grade = 'transcender'");
       break;
     case "cadet":
-      statusQuery.grade = "cadet";
+      studentFilters.push("s.grade = 'cadet'");
       break;
     case "piscine":
-      statusQuery.grade = "piscine";
-      statusQuery["active?"] = true;
+      studentFilters.push("s.grade = 'piscine' AND s.`active?` = true");
       break;
     case "sinker":
-      statusQuery.sinker = true;
+      studentFilters.push("s.sinker = true");
       break;
     case "freeze":
-      statusQuery.freeze = true;
+      studentFilters.push("s.freeze = true");
       break;
   }
-  const aggregatePipeline = [
-    {
-      $match: {
-        score: -42,
-      },
-    },
-    {
-      $group: {
-        _id: "$login",
-        cheat_count: { $sum: 1 },
-        projects: { $push: "$$ROOT" },
-      },
-    },
-    {
-      $lookup: {
-        from: "students",
-        let: { projectLogin: "$_id" },
-        pipeline: [
-          {
-            $match: {
-              $expr: { $eq: ["$login", "$$projectLogin"] },
-              ...baseQuery,
-              ...statusQuery,
-            },
-          },
-        ],
-        as: "student",
-      },
-    },
-    {
-      $unwind: "$student",
-    },
-    {
-      $replaceRoot: {
-        newRoot: {
-          $mergeObjects: [
-            "$student",
-            { cheat_count: "$cheat_count", has_cheats: "$projects" },
-          ],
-        },
-      },
-    },
-    { $sort: { cheat_count: order == "asc" ? 1 : -1 } },
-    { $skip: skip },
-    { $limit: limit },
-  ];
-  const [studentsResult, totalResult] = await Promise.all([
-    Project.aggregate(aggregatePipeline),
-    Project.aggregate([
-      {
-        $match: {
-          score: -42,
-        },
-      },
-      {
-        $group: {
-          _id: "$login",
-        },
-      },
-      {
-        $lookup: {
-          from: "students",
-          let: { projectLogin: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$login", "$$projectLogin"] },
-                ...baseQuery,
-                ...statusQuery,
-              },
-            },
-          ],
-          as: "student",
-        },
-      },
-      {
-        $match: {
-          student: { $ne: [] },
-        },
-      },
-      { $count: "total" },
-    ]),
+  
+  const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
+  
+  const n1qlQuery = `
+    SELECT s.*,
+      (SELECT COUNT(*) FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')[0] as cheat_count,
+      ARRAY p FOR p IN product._default.projects WHEN p.login = s.login AND p.score = -42 AND p.type = 'Project' END as has_cheats
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+      AND EXISTS (SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')
+    ORDER BY cheat_count ${order === "asc" ? "ASC" : "DESC"}
+    LIMIT ${limit} OFFSET ${skip}
+  `;
+  
+  const countQuery = `
+    SELECT COUNT(*) as total
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+      AND EXISTS (SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')
+  `;
+  
+  const [queryResult, countResult] = await Promise.all([
+    cluster.query(n1qlQuery),
+    cluster.query(countQuery)
   ]);
-
-  const total = totalResult[0]?.total || 0;
+  
+  const students = queryResult.rows;
+  const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
   return {
-    students: studentsResult,
+    students,
     pagination: {
       total,
       page,
@@ -304,137 +230,83 @@ async function projectcountsort(
   page
 ) {
   const skip = (page - 1) * limit;
-  const baseQuery = {
-    ...(campusId && { campusId }),
-    ...(pool && { pool_month: pool.month, pool_year: pool.year }),
-    $or: [
-      { name: { $regex: search, $options: "i" } },
-      { displayName: { $regex: search, $options: "i" } },
-      { login: { $regex: search, $options: "i" } },
-    ],
-  };
-  const statusQuery = {};
+  const cluster = getDefaultInstance().cluster;
+
+  let studentFilters = [];
+  if (campusId) studentFilters.push(`s.campusId = ${campusId}`);
+  if (pool) {
+    studentFilters.push(`s.pool_month = '${pool.month}'`);
+    studentFilters.push(`s.pool_year = '${pool.year}'`);
+  }
+  if (search) {
+    const searchPattern = search.toLowerCase();
+    studentFilters.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+  }
+  
   switch (status) {
     case "active":
-      statusQuery["active?"] = true;
+      studentFilters.push("s.`active?` = true");
       break;
     case "inactive":
-      statusQuery["active?"] = false;
+      studentFilters.push("s.`active?` = false");
       break;
     case "test":
-      statusQuery.is_test = true;
+      studentFilters.push("s.is_test = true");
       break;
     case "alumni":
-      statusQuery["alumni?"] = true;
+      studentFilters.push("s.`alumni?` = true");
       break;
     case "staff":
-      statusQuery["staff?"] = true;
+      studentFilters.push("s.`staff?` = true");
       break;
     case "blackholed":
-      statusQuery.blackholed = true;
+      studentFilters.push("s.blackholed = true");
       break;
     case "transcender":
-      statusQuery.grade = "transcender";
+      studentFilters.push("s.grade = 'transcender'");
       break;
     case "cadet":
-      statusQuery.grade = "cadet";
+      studentFilters.push("s.grade = 'cadet'");
       break;
     case "piscine":
-      statusQuery.grade = "piscine";
-      statusQuery["active?"] = true;
+      studentFilters.push("s.grade = 'piscine' AND s.`active?` = true");
       break;
     case "sinker":
-      statusQuery.sinker = true;
+      studentFilters.push("s.sinker = true");
       break;
     case "freeze":
-      statusQuery.freeze = true;
+      studentFilters.push("s.freeze = true");
       break;
   }
-  const aggregatePipeline = [
-    {
-      $match: {
-        status: "success",
-      },
-    },
-    {
-      $group: {
-        _id: "$login",
-        project_count: { $sum: 1 },
-      },
-    },
-    {
-      $lookup: {
-        from: "students",
-        let: { projectLogin: "$_id" },
-        pipeline: [
-          {
-            $match: {
-              $expr: { $eq: ["$login", "$$projectLogin"] },
-              ...baseQuery,
-              ...statusQuery,
-            },
-          },
-        ],
-        as: "student",
-      },
-    },
-    {
-      $unwind: "$student",
-    },
-    {
-      $replaceRoot: {
-        newRoot: {
-          $mergeObjects: ["$student", { project_count: "$project_count" }],
-        },
-      },
-    },
-    { $sort: { project_count: order == "asc" ? 1 : -1 } },
-    { $skip: skip },
-    { $limit: limit },
-  ];
-  const [studentsResult, totalResult] = await Promise.all([
-    Project.aggregate(aggregatePipeline),
-    Project.aggregate([
-      {
-        $match: {
-          status: "success",
-        },
-      },
-      {
-        $group: {
-          _id: "$login",
-        },
-      },
-      {
-        $lookup: {
-          from: "students",
-          let: { projectLogin: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$login", "$$projectLogin"] },
-                ...baseQuery,
-                ...statusQuery,
-              },
-            },
-          ],
-          as: "student",
-        },
-      },
-      {
-        $match: {
-          student: { $ne: [] },
-        },
-      },
-      { $count: "total" },
-    ]),
+  
+  const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
+  
+  const n1qlQuery = `
+    SELECT s.*,
+      (SELECT COUNT(*) FROM product._default.projects p WHERE p.login = s.login AND p.status = 'success' AND p.type = 'Project')[0] as project_count
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+    ORDER BY project_count ${order === "asc" ? "ASC" : "DESC"}
+    LIMIT ${limit} OFFSET ${skip}
+  `;
+  
+  const countQuery = `
+    SELECT COUNT(*) as total
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+  `;
+  
+  const [queryResult, countResult] = await Promise.all([
+    cluster.query(n1qlQuery),
+    cluster.query(countQuery)
   ]);
-
-  const total = totalResult[0]?.total || 0;
+  
+  const students = queryResult.rows;
+  const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
   return {
-    students: studentsResult,
+    students,
     pagination: {
       total,
       page,
@@ -454,144 +326,85 @@ async function projectnewcheatsort(
   page
 ) {
   const skip = (page - 1) * limit;
-  const baseQuery = {
-    ...(campusId && { campusId }),
-    ...(pool && { pool_month: pool.month, pool_year: pool.year }),
-    $or: [
-      { name: { $regex: search, $options: "i" } },
-      { displayName: { $regex: search, $options: "i" } },
-      { login: { $regex: search, $options: "i" } },
-    ],
-  };
-  const statusQuery = {};
+  const cluster = getDefaultInstance().cluster;
+
+  let studentFilters = [];
+  if (campusId) studentFilters.push(`s.campusId = ${campusId}`);
+  if (pool) {
+    studentFilters.push(`s.pool_month = '${pool.month}'`);
+    studentFilters.push(`s.pool_year = '${pool.year}'`);
+  }
+  if (search) {
+    const searchPattern = search.toLowerCase();
+    studentFilters.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+  }
+  
   switch (status) {
     case "active":
-      statusQuery["active?"] = true;
+      studentFilters.push("s.`active?` = true");
       break;
     case "inactive":
-      statusQuery["active?"] = false;
+      studentFilters.push("s.`active?` = false");
       break;
     case "test":
-      statusQuery.is_test = true;
+      studentFilters.push("s.is_test = true");
       break;
     case "alumni":
-      statusQuery["alumni?"] = true;
+      studentFilters.push("s.`alumni?` = true");
       break;
     case "staff":
-      statusQuery["staff?"] = true;
+      studentFilters.push("s.`staff?` = true");
       break;
     case "blackholed":
-      statusQuery.blackholed = true;
+      studentFilters.push("s.blackholed = true");
       break;
     case "transcender":
-      statusQuery.grade = "transcender";
+      studentFilters.push("s.grade = 'transcender'");
       break;
     case "cadet":
-      statusQuery.grade = "cadet";
+      studentFilters.push("s.grade = 'cadet'");
       break;
     case "piscine":
-      statusQuery.grade = "piscine";
-      statusQuery["active?"] = true;
+      studentFilters.push("s.grade = 'piscine' AND s.`active?` = true");
       break;
     case "sinker":
-      statusQuery.sinker = true;
+      studentFilters.push("s.sinker = true");
       break;
     case "freeze":
-      statusQuery.freeze = true;
+      studentFilters.push("s.freeze = true");
       break;
   }
-  const aggregatePipeline = [
-    {
-      $match: {
-        score: -42,
-      },
-    },
-    {
-      $sort: { updatedAt: order === "asc" ? 1 : -1 },
-    },
-    {
-      $lookup: {
-        from: "students",
-        let: { projectLogin: "$login" },
-        pipeline: [
-          {
-            $match: {
-              $expr: { $eq: ["$login", "$$projectLogin"] },
-              ...baseQuery,
-              ...statusQuery,
-            },
-          },
-        ],
-        as: "student",
-      },
-    },
-    {
-      $unwind: "$student",
-    },
-    {
-      $group: {
-        _id: "$login",
-        project: { $first: "$$ROOT" },
-        student: { $first: "$student" },
-      },
-    },
-    {
-      $replaceRoot: {
-        newRoot: {
-          $mergeObjects: [
-            "$student",
-            { latest_cheat_project: "$project", has_cheats: 1 },
-          ],
-        },
-      },
-    },
-    { $skip: skip },
-    { $limit: limit },
-  ];
-
-  const [studentsResult, totalResult] = await Promise.all([
-    Project.aggregate(aggregatePipeline).collation({ locale: "en" }),
-    Project.aggregate([
-      {
-        $match: {
-          score: -42,
-        },
-      },
-      {
-        $lookup: {
-          from: "students",
-          let: { projectLogin: "$login" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$login", "$$projectLogin"] },
-                ...baseQuery,
-                ...statusQuery,
-              },
-            },
-          ],
-          as: "student",
-        },
-      },
-      {
-        $match: {
-          student: { $ne: [] },
-        },
-      },
-      {
-        $group: {
-          _id: "$login",
-        },
-      },
-      { $count: "total" },
-    ]),
+  
+  const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
+  
+  const n1qlQuery = `
+    SELECT s.*,
+      (SELECT p FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project' ORDER BY p.updatedAt ${order === "asc" ? "ASC" : "DESC"} LIMIT 1)[0] as latest_cheat_project,
+      1 as has_cheats
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+      AND EXISTS (SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')
+    LIMIT ${limit} OFFSET ${skip}
+  `;
+  
+  const countQuery = `
+    SELECT COUNT(*) as total
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+      AND EXISTS (SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')
+  `;
+  
+  const [queryResult, countResult] = await Promise.all([
+    cluster.query(n1qlQuery),
+    cluster.query(countQuery)
   ]);
-
-  const total = totalResult[0]?.total || 0;
+  
+  const students = queryResult.rows;
+  const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
   return {
-    students: studentsResult,
+    students,
     pagination: {
       total,
       page,
@@ -612,214 +425,84 @@ async function familybasesort(
     sorttype
 ) {
     const skip = (page - 1) * limit;
-    const baseQuery = {
-        ...(campusId && { campusId }),
-        ...(pool && { pool_month: pool.month, pool_year: pool.year }),
-        $or: [
-            { name: { $regex: search, $options: "i" } },
-            { displayName: { $regex: search, $options: "i" } },
-            { login: { $regex: search, $options: "i" } },
-        ],
-    };
-    const statusQuery = {};
+    const cluster = getDefaultInstance().cluster;
+
+    let studentFilters = [];
+    if (campusId) studentFilters.push(`s.campusId = ${campusId}`);
+    if (pool) {
+        studentFilters.push(`s.pool_month = '${pool.month}'`);
+        studentFilters.push(`s.pool_year = '${pool.year}'`);
+    }
+    if (search) {
+        const searchPattern = search.toLowerCase();
+        studentFilters.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+    }
+    
     switch (status) {
         case "active":
-            statusQuery["active?"] = true;
+            studentFilters.push("s.`active?` = true");
             break;
         case "inactive":
-            statusQuery["active?"] = false;
+            studentFilters.push("s.`active?` = false");
             break;
         case "test":
-            statusQuery.is_test = true;
+            studentFilters.push("s.is_test = true");
             break;
         case "alumni":
-            statusQuery["alumni?"] = true;
+            studentFilters.push("s.`alumni?` = true");
             break;
         case "staff":
-            statusQuery["staff?"] = true;
+            studentFilters.push("s.`staff?` = true");
             break;
         case "blackholed":
-            statusQuery.blackholed = true;
+            studentFilters.push("s.blackholed = true");
             break;
         case "transcender":
-            statusQuery.grade = "transcender";
+            studentFilters.push("s.grade = 'transcender'");
             break;
         case "cadet":
-            statusQuery.grade = "cadet";
+            studentFilters.push("s.grade = 'cadet'");
             break;
         case "piscine":
-            statusQuery.grade = "piscine";
-            statusQuery["active?"] = true;
+            studentFilters.push("s.grade = 'piscine' AND s.`active?` = true");
             break;
         case "sinker":
-            statusQuery.sinker = true;
+            studentFilters.push("s.sinker = true");
             break;
         case "freeze":
-            statusQuery.freeze = true;
+            studentFilters.push("s.freeze = true");
             break;
     }
-
-    const aggregatePipeline = [
-        {
-            $facet: {
-                as_godfather: [
-                    {
-                        $group: {
-                            _id: "$godfather",
-                            children_count: { $sum: 1 },
-                        },
-                    },
-                ],
-                as_children: [
-                    {
-                        $group: {
-                            _id: "$children",
-                            godfather_count: { $sum: 1 },
-                        },
-                    },
-                ],
-            },
-        },
-        {
-            $project: {
-                combined: {
-                    $concatArrays: [
-                        {
-                            $map: {
-                                input: "$as_godfather",
-                                as: "item",
-                                in: {
-                                    login: "$$item._id",
-                                    children_count: "$$item.children_count",
-                                    godfather_count: 0,
-                                },
-                            },
-                        },
-                        {
-                            $map: {
-                                input: "$as_children",
-                                as: "item",
-                                in: {
-                                    login: "$$item._id",
-                                    children_count: 0,
-                                    godfather_count: "$$item.godfather_count",
-                                },
-                            },
-                        },
-                    ],
-                },
-            },
-        },
-        { $unwind: "$combined" },
-        {
-            $group: {
-                _id: "$combined.login",
-                children_count: { $sum: "$combined.children_count" },
-                godfather_count: { $sum: "$combined.godfather_count" },
-            },
-        },
-        {
-            $lookup: {
-                from: "students",
-                let: { login: "$_id" },
-                pipeline: [
-                    {
-                        $match: {
-                            $expr: { $eq: ["$login", "$$login"] },
-                            ...baseQuery,
-                            ...statusQuery,
-                        },
-                    },
-                ],
-                as: "student",
-            },
-        },
-        { $unwind: "$student" },
-        {
-            $replaceRoot: {
-                newRoot: {
-                    $mergeObjects: [
-                        "$student",
-                        {
-                            children_count: "$children_count",
-                            godfather_count: "$godfather_count",
-                        },
-                    ],
-                },
-            },
-        },
-        { $sort: { [sorttype]: order === "asc" ? 1 : -1 } },
-        { $skip: skip },
-        { $limit: limit },
-    ];
-
-    const [studentsResult, totalResult] = await Promise.all([
-        Patronage.aggregate(aggregatePipeline),
-        Patronage.aggregate([
-            {
-                $facet: {
-                    as_godfather: [
-                        {
-                            $group: {
-                                _id: "$godfather",
-                            },
-                        },
-                    ],
-                    as_children: [
-                        {
-                            $group: {
-                                _id: "$children",
-                            },
-                        },
-                    ],
-                },
-            },
-            {
-                $project: {
-                    combined: {
-                        $concatArrays: [
-                            { $map: { input: "$as_godfather", as: "item", in: "$$item._id" } },
-                            { $map: { input: "$as_children", as: "item", in: "$$item._id" } },
-                        ],
-                    },
-                },
-            },
-            { $unwind: "$combined" },
-            {
-                $group: {
-                    _id: "$combined",
-                },
-            },
-            {
-                $lookup: {
-                    from: "students",
-                    let: { login: "$_id" },
-                    pipeline: [
-                        {
-                            $match: {
-                                $expr: { $eq: ["$login", "$$login"] },
-                                ...baseQuery,
-                                ...statusQuery,
-                            },
-                        },
-                    ],
-                    as: "student",
-                },
-            },
-            {
-                $match: {
-                    student: { $ne: [] },
-                },
-            },
-            { $count: "total" },
-        ]),
+    
+    const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
+    
+    const n1qlQuery = `
+        SELECT s.*,
+            (SELECT COUNT(*) FROM product._default.patronages p UNNEST p.children c WHERE c.login = s.login AND p.type = 'Patronage')[0] as godfather_count,
+            (SELECT COUNT(*) FROM product._default.patronages p UNNEST p.godfathers g WHERE g.login = s.login AND p.type = 'Patronage')[0] as children_count
+        FROM product._default.students s
+        WHERE s.type = 'Student' ${studentWhere}
+        ORDER BY ${sorttype} ${order === "asc" ? "ASC" : "DESC"}
+        LIMIT ${limit} OFFSET ${skip}
+    `;
+    
+    const countQuery = `
+        SELECT COUNT(*) as total
+        FROM product._default.students s
+        WHERE s.type = 'Student' ${studentWhere}
+    `;
+    
+    const [queryResult, countResult] = await Promise.all([
+        cluster.query(n1qlQuery),
+        cluster.query(countQuery)
     ]);
-
-    const total = totalResult[0]?.total || 0;
+    
+    const students = queryResult.rows;
+    const total = countResult.rows[0]?.total || 0;
     const totalPages = Math.ceil(total / limit);
     
     return {
-        students: studentsResult,
+        students,
         pagination: {
             total,
             page,
@@ -839,190 +522,92 @@ async function logtimesort(
   page
 ) {
   const skip = (page - 1) * limit;
-  const baseQuery = {
-    ...(campusId && { campusId }),
-    ...(pool && { pool_month: pool.month, pool_year: pool.year }),
-    $or: [
-      { name: { $regex: search, $options: "i" } },
-      { displayName: { $regex: search, $options: "i" } },
-      { login: { $regex: search, $options: "i" } },
-    ],
-  };
-  const statusQuery = {};
+  const cluster = getDefaultInstance().cluster;
+
+  let studentFilters = [];
+  if (campusId) studentFilters.push(`s.campusId = ${campusId}`);
+  if (pool) {
+    studentFilters.push(`s.pool_month = '${pool.month}'`);
+    studentFilters.push(`s.pool_year = '${pool.year}'`);
+  }
+  if (search) {
+    const searchPattern = search.toLowerCase();
+    studentFilters.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+  }
+  
   switch (status) {
     case "active":
-      statusQuery["active?"] = true;
+      studentFilters.push("s.`active?` = true");
       break;
     case "inactive":
-      statusQuery["active?"] = false;
+      studentFilters.push("s.`active?` = false");
       break;
     case "test":
-      statusQuery.is_test = true;
+      studentFilters.push("s.is_test = true");
       break;
     case "alumni":
-      statusQuery["alumni?"] = true;
+      studentFilters.push("s.`alumni?` = true");
       break;
     case "staff":
-      statusQuery["staff?"] = true;
+      studentFilters.push("s.`staff?` = true");
       break;
     case "blackholed":
-      statusQuery.blackholed = true;
+      studentFilters.push("s.blackholed = true");
       break;
     case "transcender":
-      statusQuery.grade = "transcender";
+      studentFilters.push("s.grade = 'transcender'");
       break;
     case "cadet":
-      statusQuery.grade = "cadet";
+      studentFilters.push("s.grade = 'cadet'");
       break;
     case "piscine":
-      statusQuery.grade = "piscine";
-      statusQuery["active?"] = true;
+      studentFilters.push("s.grade = 'piscine' AND s.`active?` = true");
       break;
     case "sinker":
-      statusQuery.sinker = true;
+      studentFilters.push("s.sinker = true");
       break;
     case "freeze":
-      statusQuery.freeze = true;
+      studentFilters.push("s.freeze = true");
       break;
   }
-
-  const aggregatePipeline = [
-    {
-      $match: campusId ? { campusId } : {},
-    },
-    {
-      $addFields: {
-        totalLogTime: {
-          $reduce: {
-            input: { $objectToArray: "$months" },
-            initialValue: 0,
-            in: {
-              $add: [
-                "$$value",
-                {
-                  $let: {
-                    vars: {
-                      duration: "$$this.v.totalDuration",
-                    },
-                    in: {
-                      $cond: {
-                        if: { $ne: ["$$duration", null] },
-                        then: {
-                          $sum: [
-                            {
-                              $multiply: [
-                                {
-                                  $toInt: {
-                                    $arrayElemAt: [
-                                      { $split: ["$$duration", ":"] },
-                                      0,
-                                    ],
-                                  },
-                                },
-                                3600,
-                              ],
-                            },
-                            {
-                              $multiply: [
-                                {
-                                  $toInt: {
-                                    $arrayElemAt: [
-                                      { $split: ["$$duration", ":"] },
-                                      1,
-                                    ],
-                                  },
-                                },
-                                60,
-                              ],
-                            },
-                            {
-                              $toInt: {
-                                $arrayElemAt: [
-                                  { $split: ["$$duration", ":"] },
-                                  2,
-                                ],
-                              },
-                            },
-                          ],
-                        },
-                        else: 0,
-                      },
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-    },
-    {
-      $lookup: {
-        from: "students",
-        let: { locationLogin: "$login" },
-        pipeline: [
-          {
-            $match: {
-              $expr: { $eq: ["$login", "$$locationLogin"] },
-              ...baseQuery,
-              ...statusQuery,
-            },
-          },
-        ],
-        as: "student",
-      },
-    },
-    {
-      $unwind: "$student",
-    },
-    {
-      $replaceRoot: {
-        newRoot: {
-          $mergeObjects: ["$student", { log_time: "$totalLogTime" }],
-        },
-      },
-    },
-    { $sort: { log_time: order === "asc" ? 1 : -1 } },
-    { $skip: skip },
-    { $limit: limit },
-  ];
-
-  const [studentsResult, totalResult] = await Promise.all([
-    LocationStats.aggregate(aggregatePipeline),
-    LocationStats.aggregate([
-      {
-        $match: campusId ? { campusId } : {},
-      },
-      {
-        $lookup: {
-          from: "students",
-          let: { locationLogin: "$login" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$login", "$$locationLogin"] },
-                ...baseQuery,
-                ...statusQuery,
-              },
-            },
-          ],
-          as: "student",
-        },
-      },
-      {
-        $match: {
-          student: { $ne: [] },
-        },
-      },
-      { $count: "total" },
-    ]),
+  
+  const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
+  const campusFilter = campusId ? `l.campusId = ${campusId} AND` : "";
+  
+  const n1qlQuery = `
+    SELECT s.*,
+      (SELECT SUM(
+        TONUMBER(SPLIT(m.totalDuration, ":")[0]) * 3600 +
+        TONUMBER(SPLIT(m.totalDuration, ":")[1]) * 60 +
+        TONUMBER(SPLIT(m.totalDuration, ":")[2])
+      )
+      FROM product._default.locationstats l
+      UNNEST OBJECT_NAMES(l.months) mn
+      LET m = l.months[mn]
+      WHERE ${campusFilter} l.login = s.login AND l.type = 'LocationStats')[0] as log_time
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+    ORDER BY log_time ${order === "asc" ? "ASC" : "DESC"}
+    LIMIT ${limit} OFFSET ${skip}
+  `;
+  
+  const countQuery = `
+    SELECT COUNT(*) as total
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+  `;
+  
+  const [queryResult, countResult] = await Promise.all([
+    cluster.query(n1qlQuery),
+    cluster.query(countQuery)
   ]);
-
-  const total = totalResult[0]?.total || 0;
+  
+  const students = queryResult.rows;
+  const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
   return {
-    students: studentsResult,
+    students,
     pagination: {
       total,
       page,
@@ -1042,135 +627,84 @@ async function feedbackcountsort(
   page
 ) {
   const skip = (page - 1) * limit;
-  const baseQuery = {
-    ...(campusId && { campusId }),
-    ...(pool && { pool_month: pool.month, pool_year: pool.year }),
-    $or: [
-      { name: { $regex: search, $options: "i" } },
-      { displayName: { $regex: search, $options: "i" } },
-      { login: { $regex: search, $options: "i" } },
-    ],
-  };
-  const statusQuery = {};
+  const cluster = getDefaultInstance().cluster;
+
+  let studentFilters = [];
+  if (campusId) studentFilters.push(`s.campusId = ${campusId}`);
+  if (pool) {
+    studentFilters.push(`s.pool_month = '${pool.month}'`);
+    studentFilters.push(`s.pool_year = '${pool.year}'`);
+  }
+  if (search) {
+    const searchPattern = search.toLowerCase();
+    studentFilters.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+  }
+  
   switch (status) {
     case "active":
-      statusQuery["active?"] = true;
+      studentFilters.push("s.`active?` = true");
       break;
     case "inactive":
-      statusQuery["active?"] = false;
+      studentFilters.push("s.`active?` = false");
       break;
     case "test":
-      statusQuery.is_test = true;
+      studentFilters.push("s.is_test = true");
       break;
     case "alumni":
-      statusQuery["alumni?"] = true;
+      studentFilters.push("s.`alumni?` = true");
       break;
     case "staff":
-      statusQuery["staff?"] = true;
+      studentFilters.push("s.`staff?` = true");
       break;
     case "blackholed":
-      statusQuery.blackholed = true;
+      studentFilters.push("s.blackholed = true");
       break;
     case "transcender":
-      statusQuery.grade = "transcender";
+      studentFilters.push("s.grade = 'transcender'");
       break;
     case "cadet":
-      statusQuery.grade = "cadet";
+      studentFilters.push("s.grade = 'cadet'");
       break;
     case "piscine":
-      statusQuery.grade = "piscine";
-      statusQuery["active?"] = true;
+      studentFilters.push("s.grade = 'piscine' AND s.`active?` = true");
       break;
     case "sinker":
-      statusQuery.sinker = true;
+      studentFilters.push("s.sinker = true");
       break;
     case "freeze":
-      statusQuery.freeze = true;
+      studentFilters.push("s.freeze = true");
       break;
   }
-
-  const aggregatePipeline = [
-    {
-      $match: campusId ? { campusId } : {},
-    },
-    {
-      $group: {
-        _id: "$login",
-        feedback_count: { $sum: 1 },
-      },
-    },
-    {
-      $lookup: {
-        from: "students",
-        let: { feedbackLogin: "$_id" },
-        pipeline: [
-          {
-            $match: {
-              $expr: { $eq: ["$login", "$$feedbackLogin"] },
-              ...baseQuery,
-              ...statusQuery,
-            },
-          },
-        ],
-        as: "student",
-      },
-    },
-    {
-      $unwind: "$student",
-    },
-    {
-      $replaceRoot: {
-        newRoot: {
-          $mergeObjects: ["$student", { feedback_count: "$feedback_count" }],
-        },
-      },
-    },
-    { $sort: { feedback_count: order === "asc" ? 1 : -1 } },
-    { $skip: skip },
-    { $limit: limit },
-  ];
-
-  const [studentsResult, totalResult] = await Promise.all([
-    Feedback.aggregate(aggregatePipeline),
-    Feedback.aggregate([
-      {
-        $match: campusId ? { campusId } : {},
-      },
-      {
-        $group: {
-          _id: "$login",
-        },
-      },
-      {
-        $lookup: {
-          from: "students",
-          let: { feedbackLogin: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$login", "$$feedbackLogin"] },
-                ...baseQuery,
-                ...statusQuery,
-              },
-            },
-          ],
-          as: "student",
-        },
-      },
-      {
-        $match: {
-          student: { $ne: [] },
-        },
-      },
-      { $count: "total" },
-    ]),
+  
+  const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
+  const campusFilter = campusId ? `f.campusId = ${campusId} AND` : "";
+  
+  const n1qlQuery = `
+    SELECT s.*,
+      (SELECT COUNT(*) FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.type = 'Feedback')[0] as feedback_count
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+    ORDER BY feedback_count ${order === "asc" ? "ASC" : "DESC"}
+    LIMIT ${limit} OFFSET ${skip}
+  `;
+  
+  const countQuery = `
+    SELECT COUNT(*) as total
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+  `;
+  
+  const [queryResult, countResult] = await Promise.all([
+    cluster.query(n1qlQuery),
+    cluster.query(countQuery)
   ]);
-
-  const total = totalResult[0]?.total || 0;
+  
+  const students = queryResult.rows;
+  const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
   return {
-    students: studentsResult,
+    students,
     pagination: {
       total,
       page,
@@ -1190,141 +724,84 @@ async function averageratesort(
   page
 ) {
   const skip = (page - 1) * limit;
-  const baseQuery = {
-    ...(campusId && { campusId }),
-    ...(pool && { pool_month: pool.month, pool_year: pool.year }),
-    $or: [
-      { name: { $regex: search, $options: "i" } },
-      { displayName: { $regex: search, $options: "i" } },
-      { login: { $regex: search, $options: "i" } },
-    ],
-  };
-  const statusQuery = {};
+  const cluster = getDefaultInstance().cluster;
+
+  let studentFilters = [];
+  if (campusId) studentFilters.push(`s.campusId = ${campusId}`);
+  if (pool) {
+    studentFilters.push(`s.pool_month = '${pool.month}'`);
+    studentFilters.push(`s.pool_year = '${pool.year}'`);
+  }
+  if (search) {
+    const searchPattern = search.toLowerCase();
+    studentFilters.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+  }
+  
   switch (status) {
     case "active":
-      statusQuery["active?"] = true;
+      studentFilters.push("s.`active?` = true");
       break;
     case "inactive":
-      statusQuery["active?"] = false;
+      studentFilters.push("s.`active?` = false");
       break;
     case "test":
-      statusQuery.is_test = true;
+      studentFilters.push("s.is_test = true");
       break;
     case "alumni":
-      statusQuery["alumni?"] = true;
+      studentFilters.push("s.`alumni?` = true");
       break;
     case "staff":
-      statusQuery["staff?"] = true;
+      studentFilters.push("s.`staff?` = true");
       break;
     case "blackholed":
-      statusQuery.blackholed = true;
+      studentFilters.push("s.blackholed = true");
       break;
     case "transcender":
-      statusQuery.grade = "transcender";
+      studentFilters.push("s.grade = 'transcender'");
       break;
     case "cadet":
-      statusQuery.grade = "cadet";
+      studentFilters.push("s.grade = 'cadet'");
       break;
     case "piscine":
-      statusQuery.grade = "piscine";
-      statusQuery["active?"] = true;
+      studentFilters.push("s.grade = 'piscine' AND s.`active?` = true");
       break;
     case "sinker":
-      statusQuery.sinker = true;
+      studentFilters.push("s.sinker = true");
       break;
     case "freeze":
-      statusQuery.freeze = true;
+      studentFilters.push("s.freeze = true");
       break;
   }
-
-  const aggregatePipeline = [
-    {
-      $match: {
-        ...(campusId && { campusId }),
-        rating: { $ne: null },
-      },
-    },
-    {
-      $group: {
-        _id: "$login",
-        avg_rating: { $avg: "$rating" },
-      },
-    },
-    {
-      $lookup: {
-        from: "students",
-        let: { feedbackLogin: "$_id" },
-        pipeline: [
-          {
-            $match: {
-              $expr: { $eq: ["$login", "$$feedbackLogin"] },
-              ...baseQuery,
-              ...statusQuery,
-            },
-          },
-        ],
-        as: "student",
-      },
-    },
-    {
-      $unwind: "$student",
-    },
-    {
-      $replaceRoot: {
-        newRoot: {
-          $mergeObjects: ["$student", { avg_rating: "$avg_rating" }],
-        },
-      },
-    },
-    { $sort: { avg_rating: order === "asc" ? 1 : -1 } },
-    { $skip: skip },
-    { $limit: limit },
-  ];
-
-  const [studentsResult, totalResult] = await Promise.all([
-    Feedback.aggregate(aggregatePipeline),
-    Feedback.aggregate([
-      {
-        $match: {
-          ...(campusId && { campusId }),
-          rating: { $ne: null },
-        },
-      },
-      {
-        $group: {
-          _id: "$login",
-        },
-      },
-      {
-        $lookup: {
-          from: "students",
-          let: { feedbackLogin: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$login", "$$feedbackLogin"] },
-                ...baseQuery,
-                ...statusQuery,
-              },
-            },
-          ],
-          as: "student",
-        },
-      },
-      {
-        $match: {
-          student: { $ne: [] },
-        },
-      },
-      { $count: "total" },
-    ]),
+  
+  const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
+  const campusFilter = campusId ? `f.campusId = ${campusId} AND` : "";
+  
+  const n1qlQuery = `
+    SELECT s.*,
+      (SELECT AVG(f.rating) FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.rating IS NOT NULL AND f.type = 'Feedback')[0] as avg_rating
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+    ORDER BY avg_rating ${order === "asc" ? "ASC" : "DESC"}
+    LIMIT ${limit} OFFSET ${skip}
+  `;
+  
+  const countQuery = `
+    SELECT COUNT(*) as total
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
+  `;
+  
+  const [queryResult, countResult] = await Promise.all([
+    cluster.query(n1qlQuery),
+    cluster.query(countQuery)
   ]);
-
-  const total = totalResult[0]?.total || 0;
+  
+  const students = queryResult.rows;
+  const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
   return {
-    students: studentsResult,
+    students,
     pagination: {
       total,
       page,
