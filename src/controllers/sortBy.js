@@ -612,16 +612,33 @@ async function logtimesort(
   }
   
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
-  const campusFilter = campusId ? `AND l.campusId = ${campusId}` : "";
+  const campusFilter = campusId ? `AND loc.campusId = ${campusId}` : "";
   
-  // Get students with their locationstats data
+  // Use LET to pre-calculate log_time for each student
   const n1qlQuery = `
-    SELECT s.*, 
-      (SELECT RAW l FROM product._default.locationstats l 
-       WHERE l.login = s.login AND l.type = 'LocationStats' ${campusFilter} LIMIT 1)[0] as locationstats,
-      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
-    FROM product._default.students s
-    WHERE s.type = 'Student' ${studentWhere}
+    WITH student_logtimes AS (
+      SELECT s.*, 
+        (SELECT SUM(
+          TONUMBER(SUBSTR(m.totalDuration, 0, 2)) * 3600 +
+          TONUMBER(SUBSTR(m.totalDuration, 3, 2)) * 60 +
+          TONUMBER(SUBSTR(m.totalDuration, 6, 2))
+        )
+        FROM product._default.locationstats loc
+        UNNEST OBJECT_VALUES(loc.months) AS m
+        WHERE loc.login = s.login AND loc.type = 'LocationStats' ${campusFilter})[0] as log_time_calc
+      FROM product._default.students s
+      WHERE s.type = 'Student' ${studentWhere}
+    )
+    SELECT st.id, st.campusId, st.email, st.login, st.first_name, st.last_name, st.usual_full_name, 
+      st.usual_first_name, st.url, st.phone, st.displayname, st.kind, st.image, st.\`staff?\`, 
+      st.correction_point, st.pool_month, st.pool_year, st.wallet, st.anonymize_date, 
+      st.data_erasure_date, st.alumnized_at, st.\`alumni?\`, st.\`active?\`, st.created_at, 
+      st.blackholed, st.next_milestone, st.freeze, st.sinker, st.grade, st.is_piscine, 
+      st.is_trans, st.is_test, st.\`level\`, st.type, st.createdAt, st.updatedAt,
+      IFNULL(st.log_time_calc, 0) as log_time,
+      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = st.login AND p.score = -42 AND p.type = 'Project') as has_cheats
+    FROM student_logtimes st
+    ORDER BY log_time ${order === "asc" ? "ASC" : "DESC"}
     LIMIT ${limit} OFFSET ${skip}
   `;
   
@@ -638,30 +655,9 @@ async function logtimesort(
     cluster.query(countQuery)
   ]);
   
-  // Calculate log_time in JavaScript
-  const students = queryResult.rows.map(student => {
-    let log_time = 0;
-    if (student.locationstats && student.locationstats.months) {
-      for (const monthKey in student.locationstats.months) {
-        const month = student.locationstats.months[monthKey];
-        if (month.totalDuration && month.totalDuration !== "00:00:00") {
-          const parts = month.totalDuration.split(':');
-          if (parts.length === 3) {
-            log_time += parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
-          }
-        }
-      }
-    }
-    delete student.locationstats; // Remove temporary field
-    student.log_time = log_time;
-    return student;
-  });
+  console.log('[logtimesort] First 3 results:', JSON.stringify(queryResult.rows.slice(0, 3).map(s => ({login: s.login, log_time: s.log_time})), null, 2));
   
-  // Sort by log_time
-  students.sort((a, b) => order === "asc" ? a.log_time - b.log_time : b.log_time - a.log_time);
-  
-  console.log('[logtimesort] First 3 results:', JSON.stringify(students.slice(0, 3).map(s => ({login: s.login, log_time: s.log_time})), null, 2));
-  
+  const students = queryResult.rows;
   const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
