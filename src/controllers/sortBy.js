@@ -619,13 +619,15 @@ async function logtimesort(
     WITH student_logtimes AS (
       SELECT s.*, 
         (SELECT RAW SUM(
-          TONUMBER(SUBSTR(m.totalDuration, 0, 2)) * 3600 +
-          TONUMBER(SUBSTR(m.totalDuration, 3, 2)) * 60 +
-          TONUMBER(SUBSTR(m.totalDuration, 6, 2))
+          TONUMBER(SUBSTR(monthData.totalDuration, 0, 2)) * 3600 +
+          TONUMBER(SUBSTR(monthData.totalDuration, 3, 2)) * 60 +
+          TONUMBER(SUBSTR(monthData.totalDuration, 6, 2))
         )
         FROM product._default.locationstats loc
-        UNNEST OBJECT_VALUES(loc.months) AS m
-        WHERE loc.login = s.login AND loc.type = 'LocationStats' ${campusFilter})[0] as log_time_calc
+        UNNEST OBJECT_NAMES(loc.months) AS monthKey
+        LET monthData = loc.months[monthKey]
+        WHERE loc.login = s.login AND loc.type = 'LocationStats' ${campusFilter}
+          AND monthData.totalDuration IS NOT NULL)[0] as log_time_calc
       FROM product._default.students s
       WHERE s.type = 'Student' ${studentWhere}
     )
