@@ -496,6 +496,8 @@ async function familybasesort(
     const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
     
     // sorttype can be godfather_count or children_count
+    // godfather_count: Bu öğrenci kaç kişinin godfatheri (bu öğrenci children dizisinde)
+    // children_count: Bu öğrencinin kaç childreni var (bu öğrenci godfathers dizisinde)
     const n1qlQuery = `
         SELECT s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
           s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
@@ -503,8 +505,11 @@ async function familybasesort(
           s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
           s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
           s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-          SUM(CASE WHEN p.children IS NOT MISSING THEN ARRAY_LENGTH(p.children) ELSE 0 END) as godfather_count,
-          SUM(CASE WHEN p.godfathers IS NOT MISSING THEN ARRAY_LENGTH(p.godfathers) ELSE 0 END) as children_count,
+          COUNT(DISTINCT p.login) as godfather_count,
+          (SELECT VALUE COUNT(1) 
+           FROM product._default.patronages pg 
+           UNNEST pg.godfathers g 
+           WHERE g.login = s.login AND pg.type = 'Patronage')[0] as children_count,
           CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
         FROM product._default.patronages p
         UNNEST p.children c
