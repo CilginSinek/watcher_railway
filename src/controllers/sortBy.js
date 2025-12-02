@@ -621,33 +621,26 @@ async function logtimesort(
       s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
       s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
       s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-      SUM(
+      (SELECT SUM(
         TONUMBER(SPLIT(m.totalDuration, ":")[0]) * 3600 +
         TONUMBER(SPLIT(m.totalDuration, ":")[1]) * 60 +
         TONUMBER(SPLIT(m.totalDuration, ":")[2])
-      ) as log_time,
-      CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
-    FROM product._default.locationstats l
-    UNNEST OBJECT_NAMES(l.months) AS mn
-    LET m = l.months[mn]
-    JOIN product._default.students s ON s.login = l.login AND s.type = 'Student'
-    LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
-    WHERE ${campusFilter} l.type = 'LocationStats' ${studentWhere}
-    GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
-      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
-      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
-      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
-      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
-      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt
+      )
+      FROM product._default.locationstats l
+      UNNEST OBJECT_NAMES(l.months) AS mn
+      LET m = l.months[mn]
+      WHERE ${campusFilter} l.login = s.login AND l.type = 'LocationStats')[0] as log_time,
+      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
     ORDER BY log_time ${order === "asc" ? "ASC" : "DESC"}
     LIMIT ${limit} OFFSET ${skip}
   `;
   
   const countQuery = `
-    SELECT COUNT(DISTINCT l.login) as total
-    FROM product._default.locationstats l
-    INNER JOIN product._default.students s ON s.login = l.login AND s.type = 'Student'
-    WHERE ${campusFilter} l.type = 'LocationStats' ${studentWhere}
+    SELECT COUNT(*) as total
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
   `;
   
   const [queryResult, countResult] = await Promise.all([
