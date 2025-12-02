@@ -67,6 +67,11 @@ function validateSearch(search) {
  * @returns {object|null} - {month, year} or null
  */
 function validatePool(year, month) {
+  // Allow empty/null values - return null if both are empty
+  if ((!month || month === '') && (!year || year === '')) {
+    return null;
+  }
+  
   if (!month || typeof month !== 'string') {
     throw new Error('Invalid pool month: must be a non-empty string');
   }
