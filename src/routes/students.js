@@ -21,7 +21,16 @@ const {
   validateActive,
   validateStatus,
 } = require("../utils/validators");
-const { loginbasesort } = require("../controllers/sortBy");
+const {
+  loginbasesort,
+  projectcheatsort,
+  projectcountsort,
+  projectnewcheatsort,
+  familybasesort,
+  logtimesort,
+  feedbackcountsort,
+  averageratesort,
+} = require("../controllers/sortBy");
 
 /**
  * GET /api/students/pools?campusId={campusId}
@@ -286,7 +295,7 @@ router.get("/", async (req, res) => {
         validatedPage
       );
     } else if (validatedSort == "cheat_count") {
-      students = await cheatcountsort(
+      students = await projectcheatsort(
         validatedCampusId,
         validatedStatus,
         validatedPool,
@@ -296,7 +305,7 @@ router.get("/", async (req, res) => {
         validatedPage
       );
     } else if (validatedSort == "new_cheat") {
-      students = await newcheatsort(
+      students = await projectnewcheatsort(
         validatedCampusId,
         validatedStatus,
         validatedPool,
@@ -309,7 +318,7 @@ router.get("/", async (req, res) => {
       validatedSort == "godfather_count" ||
       validatedSort == "children_count"
     ) {
-      students = await patronagesort(
+      students = await familybasesort(
         validatedCampusId,
         validatedStatus,
         validatedPool,
@@ -329,8 +338,8 @@ router.get("/", async (req, res) => {
         validatedLimit,
         validatedPage
       );
-    } else if (validatedSort == "evo_performance") {
-      students = await evoperformancesort(
+    } else if (validatedSort == "feedback_count") {
+      students = await feedbackcountsort(
         validatedCampusId,
         validatedStatus,
         validatedPool,
@@ -339,19 +348,15 @@ router.get("/", async (req, res) => {
         validatedLimit,
         validatedPage
       );
-    } else if (
-      validatedSort == "feedback_count" ||
-      validatedSort == "avg_rating"
-    ) {
-      students = await feedbacksort(
+    } else if (validatedSort == "avg_rating") {
+      students = await averageratesort(
         validatedCampusId,
         validatedStatus,
         validatedPool,
         validatedSearch,
         validatedOrder,
         validatedLimit,
-        validatedPage,
-        validatedSort
+        validatedPage
       );
     } else {
       res

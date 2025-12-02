@@ -83,10 +83,9 @@ async function loginbasesort(
   
   const whereClause = whereConditions.join(" AND ");
   
-  // Main query with cheat check
+  // Simple query - no subqueries needed for basic fields
   const n1qlQuery = `
-    SELECT s.*, 
-      (SELECT RAW p FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project' LIMIT 1)[0] IS NOT NULL as hasFailedProject
+    SELECT s.*
     FROM product._default.students s
     WHERE ${whereClause}
     ORDER BY s.${sorttype} ${order === "asc" ? "ASC" : "DESC"}
