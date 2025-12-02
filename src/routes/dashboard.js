@@ -40,41 +40,39 @@ router.get('/', async (req, res) => {
     // 1. Top Project Submitters (current month) - Optimized with subquery
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const topProjectSubmittersQuery = `
-      SELECT login, projectCount, totalScore,
-        (SELECT s.id FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as id,
-        (SELECT s.displayname FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as displayname,
-        (SELECT s.image FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as image
+      SELECT login, projectCount, totalScore, id, displayname, image
       FROM (
         SELECT p.login, 
           COUNT(*) as projectCount,
           SUM(p.score) as totalScore
         FROM product._default.projects p
-        USE INDEX (idx_projects_dashboard USING GSI)
         WHERE p.type = 'Project' 
           AND p.status = 'finished'
           AND p.date >= '${monthStart}'
           ${campusWhereP}
         GROUP BY p.login
       ) AS agg
+      LET id = (SELECT RAW s.id FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0],
+          displayname = (SELECT RAW s.displayname FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0],
+          image = (SELECT RAW s.image FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0]
       ORDER BY projectCount DESC
       LIMIT 10
     `;
     
     // 2. All Time Projects - Optimized with subquery
     const allTimeProjectsQuery = `
-      SELECT login, projectCount,
-        (SELECT s.id FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as id,
-        (SELECT s.displayname FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as displayname,
-        (SELECT s.image FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as image,
-        (SELECT s.correction_point FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as correction_point,
-        (SELECT s.wallet FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0] as wallet
+      SELECT login, projectCount, id, displayname, image, correction_point, wallet
       FROM (
         SELECT p.login, COUNT(*) as projectCount
         FROM product._default.projects p
-        USE INDEX (idx_projects_dashboard USING GSI)
         WHERE p.type = 'Project' ${campusWhereP}
         GROUP BY p.login
       ) AS agg
+      LET id = (SELECT RAW s.id FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0],
+          displayname = (SELECT RAW s.displayname FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0],
+          image = (SELECT RAW s.image FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0],
+          correction_point = (SELECT RAW s.correction_point FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0],
+          wallet = (SELECT RAW s.wallet FROM product._default.students s WHERE s.login = agg.login AND s.type = 'Student' LIMIT 1)[0]
       ORDER BY projectCount DESC
       LIMIT 10
     `;
