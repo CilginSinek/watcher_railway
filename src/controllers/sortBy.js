@@ -181,22 +181,36 @@ async function projectcheatsort(
   
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
   
-  // First, get students with cheat projects using a simpler approach
+  // Start from projects (indexed), then join to students
   const n1qlQuery = `
-    SELECT s.login
-    FROM product._default.students s
-    WHERE s.type = 'Student' ${studentWhere}
-      AND EXISTS (SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')
+    SELECT s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
+      COUNT(p.login) as cheat_count
+    FROM product._default.projects p
+    INNER JOIN product._default.students s ON s.login = p.login AND s.type = 'Student'
+    WHERE p.type = 'Project' AND p.score = -42 ${studentWhere}
+    GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt
+    ORDER BY cheat_count ${order === "asc" ? "ASC" : "DESC"}
     LIMIT ${limit} OFFSET ${skip}
   `;
   
   console.log('[projectcheatsort] N1QL Query:', n1qlQuery);
   
+  // Count unique students with cheat projects
   const countQuery = `
-    SELECT COUNT(*) as total
-    FROM product._default.students s
-    WHERE s.type = 'Student' ${studentWhere}
-      AND EXISTS (SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')
+    SELECT COUNT(DISTINCT p.login) as total
+    FROM product._default.projects p
+    INNER JOIN product._default.students s ON s.login = p.login AND s.type = 'Student'
+    WHERE p.type = 'Project' AND p.score = -42 ${studentWhere}
   `;
   
   const [queryResult, countResult] = await Promise.all([
@@ -204,42 +218,10 @@ async function projectcheatsort(
     cluster.query(countQuery)
   ]);
   
-  const logins = queryResult.rows.map(r => r.login);
+  console.log('[projectcheatsort] Result sample:', JSON.stringify(queryResult.rows[0], null, 2));
+  console.log('[projectcheatsort] First student cheat_count:', queryResult.rows[0]?.cheat_count);
   
-  if (logins.length === 0) {
-    return {
-      students: [],
-      pagination: {
-        total: 0,
-        page,
-        limit,
-        totalPages: 0,
-      },
-    };
-  }
-  
-  // Now get full student data with counts in one query using IN clause
-  const loginList = logins.map(l => `"${l}"`).join(',');
-  const detailQuery = `
-    SELECT 
-      s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
-      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
-      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
-      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
-      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
-      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-      (SELECT VALUE COUNT(1) FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')[0] as cheat_count
-    FROM product._default.students s
-    WHERE s.login IN [${loginList}]
-    ORDER BY cheat_count ${order === "asc" ? "ASC" : "DESC"}
-  `;
-  
-  const detailResult = await cluster.query(detailQuery);
-  
-  console.log('[projectcheatsort] Detail result sample:', JSON.stringify(detailResult.rows[0], null, 2));
-  console.log('[projectcheatsort] First student cheat_count:', detailResult.rows[0]?.cheat_count);
-  
-  const students = detailResult.rows;
+  const students = queryResult.rows;
   const total = countResult.rows[0]?.total || 0;
   const totalPages = Math.ceil(total / limit);
 
