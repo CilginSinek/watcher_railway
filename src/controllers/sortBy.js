@@ -189,7 +189,8 @@ async function projectcheatsort(
       s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
       s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
       s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-      COUNT(p.login) as cheat_count
+      COUNT(p.login) as cheat_count,
+      true as has_cheat
     FROM product._default.projects p
     INNER JOIN product._default.students s ON s.login = p.login AND s.type = 'Student'
     WHERE p.type = 'Project' AND p.score = -42 ${studentWhere}
