@@ -757,12 +757,13 @@ async function feedbackcountsort(
   const cheatCampusFilter = campusId ? `p.campusId = ${campusId} AND` : "";
   
   // 2 adımlı yaklaşım: Önce aggregate, sonra join
+  // NOT: feedbacks tablosunda 'login' alanı feedback sahibini gösterir
   const n1qlQuery = `
     WITH feedback_counts AS (
-      SELECT f.evaluated as login, COUNT(*) as count
+      SELECT f.login as login, COUNT(*) as count
       FROM product._default.feedbacks f
       WHERE ${campusFilter} f.type = 'Feedback'
-      GROUP BY f.evaluated
+      GROUP BY f.login
     ),
     cheat_checks AS (
       SELECT DISTINCT p.login
