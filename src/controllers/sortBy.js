@@ -621,11 +621,11 @@ async function logtimesort(
       s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
       s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
       s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-      IFNULL((SELECT VALUE SUM(
-        CASE WHEN m.totalDuration IS NOT NULL AND m.totalDuration != "" 
-        THEN TONUMBER(SPLIT(m.totalDuration, ":")[0]) * 3600 +
-             TONUMBER(SPLIT(m.totalDuration, ":")[1]) * 60 +
-             TONUMBER(SPLIT(m.totalDuration, ":")[2])
+      IFNULL((SELECT RAW SUM(
+        CASE WHEN m.totalDuration IS NOT NULL AND m.totalDuration != "" AND m.totalDuration != "00:00:00"
+        THEN TONUMBER(SUBSTR(m.totalDuration, 0, 2)) * 3600 +
+             TONUMBER(SUBSTR(m.totalDuration, 3, 2)) * 60 +
+             TONUMBER(SUBSTR(m.totalDuration, 6, 2))
         ELSE 0 END
       )
       FROM product._default.locationstats l
