@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { Student, Project, LocationStats, Feedback } = require('../models');
 const { validateCampusId } = require('../utils/validators');
+const { getDefaultInstance } = require('ottoman');
 
 /**
  * GET /api/dashboard?campusId={campusId}
@@ -32,84 +33,172 @@ router.get('/', async (req, res) => {
     const now = new Date();
     const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     
-    // Build campus filter
-    const campusFilter = validatedCampusId !== null ? { campusId: validatedCampusId } : {};
+    const cluster = getDefaultInstance().cluster;
+    const campusWhere = validatedCampusId !== null ? `AND s.campusId = ${validatedCampusId}` : '';
+    const campusWhereP = validatedCampusId !== null ? `AND p.campusId = ${validatedCampusId}` : '';
     
-    console.log('Dashboard query - campusFilter:', campusFilter);
-    
-    // Fetch all students once for better performance
-    let allStudentsCache = [];
-    try {
-      const result = await Student.find(campusFilter);
-      allStudentsCache = result?.rows || [];
-    } catch (dbError) {
-      console.error('Error fetching students cache:', dbError.message);
-      allStudentsCache = [];
-    }
-    
-    // Create student lookup map
-    const studentMap = {};
-    allStudentsCache.forEach(s => {
-      studentMap[s.login] = s;
-    });
-    
-    // 1. Top Project Submitters (current month)
+    // 1. Top Project Submitters (current month) - N1QL GROUP BY
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-    console.log('Month start:', monthStart);
+    const topProjectSubmittersQuery = `
+      SELECT p.login, 
+        COUNT(*) as projectCount,
+        SUM(p.score) as totalScore,
+        s.id, s.displayname, s.image
+      FROM product._default.projects p
+      INNER JOIN product._default.students s ON s.login = p.login AND s.type = 'Student'
+      WHERE p.type = 'Project' 
+        AND p.status = 'finished'
+        AND p.date >= '${monthStart}'
+        ${campusWhereP}
+      GROUP BY p.login, s.id, s.displayname, s.image
+      ORDER BY projectCount DESC
+      LIMIT 10
+    `;
     
-    let projectsThisMonth = [];
-    try {
-      const result = await Project.find({
-        ...campusFilter,
-        date: { $gte: monthStart }
-      });
-      console.log('Projects found:', result?.rows?.length || 0);
-      // Ottoman returns {rows: [], meta: {}}
-      const projects = result?.rows || [];
-      // Filter by status (DB doesn't have validated? field)
-      projectsThisMonth = projects.filter(p => p.status === 'finished');
-      console.log('Finished projects:', projectsThisMonth.length);
-    } catch (dbError) {
-      console.error('Error fetching projects:', dbError.message);
-      projectsThisMonth = [];
-    }
+    // 2. All Time Projects - N1QL GROUP BY
+    const allTimeProjectsQuery = `
+      SELECT p.login,
+        COUNT(*) as projectCount,
+        s.id, s.displayname, s.image, s.correction_point, s.wallet
+      FROM product._default.projects p
+      INNER JOIN product._default.students s ON s.login = p.login AND s.type = 'Student'
+      WHERE p.type = 'Project' ${campusWhereP}
+      GROUP BY p.login, s.id, s.displayname, s.image, s.correction_point, s.wallet
+      ORDER BY projectCount DESC
+      LIMIT 10
+    `;
     
-    const projectsByStudent = {};
-    projectsThisMonth.forEach(p => {
-      if (!projectsByStudent[p.login]) {
-        projectsByStudent[p.login] = { count: 0, totalScore: 0 };
+    // 3. All Time Wallet - Direct student query sorted
+    const allTimeWalletQuery = `
+      SELECT s.id, s.login, s.displayname, s.image, s.correction_point, s.wallet
+      FROM product._default.students s
+      WHERE s.type = 'Student' ${campusWhere}
+      ORDER BY s.wallet DESC
+      LIMIT 10
+    `;
+    
+    // 4. All Time Correction Points
+    const allTimePointsQuery = `
+      SELECT s.id, s.login, s.displayname, s.image, s.correction_point, s.wallet
+      FROM product._default.students s
+      WHERE s.type = 'Student' ${campusWhere}
+      ORDER BY s.correction_point DESC
+      LIMIT 10
+    `;
+    
+    // 5. All Time Levels
+    const allTimeLevelsQuery = `
+      SELECT s.id, s.login, s.displayname, s.image, s.correction_point, s.wallet, s.\`level\`
+      FROM product._default.students s
+      WHERE s.type = 'Student' ${campusWhere}
+      ORDER BY s.\`level\` DESC
+      LIMIT 10
+    `;
+    
+    // 6. Grade Distribution
+    const gradeDistributionQuery = `
+      SELECT s.grade as name, COUNT(*) as value
+      FROM product._default.students s
+      WHERE s.type = 'Student' 
+        AND s.\`active?\` = true 
+        AND s.\`staff?\` != true
+        AND s.grade IS NOT NULL
+        ${campusWhere}
+      GROUP BY s.grade
+    `;
+    
+    // Execute all queries in parallel
+    const [
+      topProjectSubmittersResult,
+      allTimeProjectsResult,
+      allTimeWalletResult,
+      allTimePointsResult,
+      allTimeLevelsResult,
+      gradeDistributionResult
+    ] = await Promise.all([
+      cluster.query(topProjectSubmittersQuery),
+      cluster.query(allTimeProjectsQuery),
+      cluster.query(allTimeWalletQuery),
+      cluster.query(allTimePointsQuery),
+      cluster.query(allTimeLevelsQuery),
+      cluster.query(gradeDistributionQuery)
+    ]);
+    
+    // Format results
+    const topProjectSubmitters = topProjectSubmittersResult.rows.map(row => ({
+      login: row.login,
+      projectCount: row.projectCount,
+      totalScore: row.totalScore || 0,
+      student: {
+        id: row.id,
+        login: row.login,
+        displayname: row.displayname,
+        image: row.image
       }
-      projectsByStudent[p.login].count++;
-      projectsByStudent[p.login].totalScore += p.score || 0; // DB uses 'score' not 'final_mark'
-    });
+    }));
     
-    const topProjectSubmitters = Object.entries(projectsByStudent)
-      .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, 10)
-      .map(([login, data]) => {
-        const student = studentMap[login];
-        return {
-          login,
-          projectCount: data.count,
-          totalScore: data.totalScore,
-          student: student ? {
-            id: student.id,
-            login: student.login,
-            displayname: student.displayname,
-            image: student.image
-          } : null
-        };
-      });
+    const allTimeProjects = allTimeProjectsResult.rows.map(row => ({
+      login: row.login,
+      projectCount: row.projectCount,
+      student: {
+        id: row.id,
+        login: row.login,
+        displayname: row.displayname,
+        image: row.image,
+        correction_point: row.correction_point,
+        wallet: row.wallet
+      }
+    }));
     
-    // 2. Top Location Stats (last 3 months)
+    const walletData = allTimeWalletResult.rows.map(s => ({
+      login: s.login,
+      wallet: s.wallet || 0,
+      student: {
+        id: s.id,
+        login: s.login,
+        displayname: s.displayname,
+        image: s.image,
+        correction_point: s.correction_point,
+        wallet: s.wallet
+      }
+    }));
+    
+    const pointsData = allTimePointsResult.rows.map(s => ({
+      login: s.login,
+      correctionPoint: s.correction_point || 0,
+      student: {
+        id: s.id,
+        login: s.login,
+        displayname: s.displayname,
+        image: s.image,
+        correction_point: s.correction_point,
+        wallet: s.wallet
+      }
+    }));
+    
+    const levelsData = allTimeLevelsResult.rows.map(s => ({
+      login: s.login,
+      level: s.level || 0,
+      student: {
+        id: s.id,
+        login: s.login,
+        displayname: s.displayname,
+        image: s.image,
+        correction_point: s.correction_point,
+        wallet: s.wallet
+      }
+    }));
+    
+    const gradeDistribution = gradeDistributionResult.rows;
+    
+    // Top Location Stats - needs location data (keep JavaScript calculation for complex month/day logic)
     const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-    const threeMonthsAgoKey = `${threeMonthsAgo.getFullYear()}-${String(threeMonthsAgo.getMonth() + 1).padStart(2, '0')}`;
+    const campusFilter = validatedCampusId !== null ? { campusId: validatedCampusId } : {};
     
     let allLocationStats = [];
     try {
       const result = await LocationStats.find(campusFilter);
       allLocationStats = result?.rows || [];
-      console.log('LocationStats for top stats:', allLocationStats.length, 'found');
     } catch (dbError) {
       console.error('Error fetching locations:', dbError.message);
       allLocationStats = [];
@@ -122,7 +211,6 @@ router.get('/', async (req, res) => {
       
       let totalMinutes = 0;
       Object.entries(locDoc.months).forEach(([monthKey, monthData]) => {
-        // Check if month is within last 3 months
         const monthDate = new Date(monthKey + '-01');
         if (monthDate < threeMonthsAgo) return;
         
@@ -143,9 +231,31 @@ router.get('/', async (req, res) => {
       }
     });
     
+    // Get student data for top 3
+    const topLogins = Object.entries(timeByStudent)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([login]) => login);
+    
+    const topStudentsQuery = `
+      SELECT s.login, s.displayname, s.image, s.correction_point, s.wallet
+      FROM product._default.students s
+      WHERE s.type = 'Student' AND s.login IN [${topLogins.map(l => `"${l}"`).join(',')}]
+    `;
+    
+    let topStudentsResult = { rows: [] };
+    if (topLogins.length > 0) {
+      topStudentsResult = await cluster.query(topStudentsQuery);
+    }
+    
+    const studentMap = {};
+    topStudentsResult.rows.forEach(s => {
+      studentMap[s.login] = s;
+    });
+    
     const topLocationStats = Object.entries(timeByStudent)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 3) // Only top 3 students
+      .slice(0, 3)
       .map(([login, totalMinutes]) => {
         const student = studentMap[login];
         const hours = Math.floor(totalMinutes / 60);
@@ -164,131 +274,16 @@ router.get('/', async (req, res) => {
         };
       });
     
-    // 3. All Time Projects
-    let allProjects = [];
-    try {
-      const result = await Project.find({ ...campusFilter });
-      allProjects = result?.rows || [];
-    } catch (dbError) {
-      console.error('Error fetching all projects:', dbError.message);
-      allProjects = [];
-    }
-    const allProjectsByStudent = {};
-    allProjects.forEach(p => {
-      allProjectsByStudent[p.login] = (allProjectsByStudent[p.login] || 0) + 1;
-    });
-    
-    const allTimeProjects = Object.entries(allProjectsByStudent)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([login, projectCount]) => {
-        const student = studentMap[login];
-        return {
-          login,
-          projectCount,
-          student: student ? {
-            id: student.id,
-            login: student.login,
-            displayname: student.displayname,
-            image: student.image,
-            correction_point: student.correction_point,
-            wallet: student.wallet
-          } : null
-        };
-      });
-    
-    // 4. All Time Wallet (use cached students)
-    console.log('Students found for wallet:', allStudentsCache.length);
-    const sorted = allStudentsCache.sort((a, b) => (b.wallet || 0) - (a.wallet || 0)).slice(0, 10);
-    const allTimeWallet = sorted;
-    console.log('Top wallet students:', allTimeWallet.length);
-    
-    const walletData = allTimeWallet.map(s => ({
-      login: s.login,
-      wallet: s.wallet || 0,
-      student: {
-        id: s.id,
-        login: s.login,
-        displayname: s.displayname,
-        image: s.image,
-        correction_point: s.correction_point,
-        wallet: s.wallet
-      }
-    }));
-    
-    // 5. All Time Correction Points (use cached students)
-    const sortedPoints = [...allStudentsCache].sort((a, b) => (b.correction_point || 0) - (a.correction_point || 0)).slice(0, 10);
-    const allTimePoints = sortedPoints;
-    
-    const pointsData = allTimePoints.map(s => ({
-      login: s.login,
-      correctionPoint: s.correction_point || 0,
-      student: {
-        id: s.id,
-        login: s.login,
-        displayname: s.displayname,
-        image: s.image,
-        correction_point: s.correction_point,
-        wallet: s.wallet
-      }
-    }));
-    
-    // 6. All Time Levels (use cached students)
-    const sortedLevels = [...allStudentsCache].sort((a, b) => (b.level || 0) - (a.level || 0)).slice(0, 10);
-    const allTimeLevels = sortedLevels;
-    
-    const levelsData = allTimeLevels.map(s => ({
-      login: s.login,
-      level: s.level || 0,
-      student: {
-        id: s.id,
-        login: s.login,
-        displayname: s.displayname,
-        image: s.image,
-        correction_point: s.correction_point,
-        wallet: s.wallet
-      }
-    }));
-    
-    // 7. Grade Distribution (use cached students, only active ones)
-    console.log('All students found:', allStudentsCache.length);
-    const allStudents = allStudentsCache.filter(s => (s['active?'] === true) && !s['staff?'] && (s.grade != null));
-    const gradeCount = {};
-    allStudents.forEach(s => {
-      const grade = s.grade || 'Unknown';
-      gradeCount[grade] = (gradeCount[grade] || 0) + 1;
-    });
-    
-    const gradeDistribution = Object.entries(gradeCount).map(([name, value]) => ({
-      name,
-      value
-    }));
-    
-    // 8. Hourly Occupancy (last 3 months average)
-    let recentLocations = [];
-    try {
-      const result = await LocationStats.find(campusFilter);
-      recentLocations = result?.rows || [];
-      console.log('LocationStats for occupancy:', recentLocations.length, 'found');
-    } catch (dbError) {
-      console.error('Error fetching recent locations:', dbError.message);
-      recentLocations = [];
-    }
-    
-    // Get last 3 months (YYYY-MM format)
+    // Hourly and Weekly Occupancy (keep JavaScript for complex date logic)
     const threeMonthsAgoDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-    const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    
-    // Track hourly and daily activity from locationstats.months structure
     const hourlyActivity = Array(24).fill(0).map(() => ({ totalMinutes: 0, uniqueStudents: new Set() }));
     const dailyActivity = { Mon: new Set(), Tue: new Set(), Wed: new Set(), Thu: new Set(), Fri: new Set(), Sat: new Set(), Sun: new Set() };
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     
-    recentLocations.forEach(locDoc => {
+    allLocationStats.forEach(locDoc => {
       if (!locDoc.months) return;
       
       Object.entries(locDoc.months).forEach(([monthKey, monthData]) => {
-        // Check if month is within last 3 months
         const monthDate = new Date(monthKey + '-01');
         if (monthDate < threeMonthsAgoDate) return;
         
@@ -296,7 +291,6 @@ router.get('/', async (req, res) => {
           Object.entries(monthData.days).forEach(([day, durationStr]) => {
             if (!durationStr || durationStr === "00:00:00") return;
             
-            // Parse duration "HH:MM:SS"
             const parts = durationStr.split(':');
             const hours = parseInt(parts[0]) || 0;
             const minutes = parseInt(parts[1]) || 0;
@@ -305,8 +299,7 @@ router.get('/', async (req, res) => {
             
             const totalMinutes = hours * 60 + minutes;
             
-            // Add to hourly activity (distribute across hours proportionally)
-            // Assume activity spread across working hours (9-18 as estimate)
+            // Distribute across working hours
             const activeHours = Math.min(hours, 9);
             for (let h = 9; h < 9 + activeHours && h < 24; h++) {
               hourlyActivity[h].totalMinutes += Math.floor(totalMinutes / activeHours);
@@ -326,7 +319,6 @@ router.get('/', async (req, res) => {
       });
     });
     
-    // Build hourly occupancy from unique students per hour
     const hourlyCount = hourlyActivity.map(h => h.uniqueStudents.size);
     const maxOccupancy = Math.max(...hourlyCount, 1);
     const hourlyOccupancy = hourlyCount.map((count, hour) => ({
@@ -335,7 +327,6 @@ router.get('/', async (req, res) => {
       occupancy: Math.round((count / maxOccupancy) * 100)
     }));
     
-    // 9. Weekly Occupancy (last 3 months average per day)
     const dailyCount = {
       Mon: dailyActivity.Mon.size,
       Tue: dailyActivity.Tue.size,
