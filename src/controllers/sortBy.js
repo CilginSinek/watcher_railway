@@ -762,10 +762,10 @@ async function feedbackcountsort(
       s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
       s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
       s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-      COUNT(f.login) as feedback_count,
+      COUNT(f.evaluated) as feedback_count,
       CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
     FROM product._default.students s
-    LEFT JOIN product._default.feedbacks f ON f.login = s.login AND f.type = 'Feedback' ${campusFilter}
+    LEFT JOIN product._default.feedbacks f ON f.evaluated = s.login AND f.type = 'Feedback' ${campusFilter}
     LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
     WHERE s.type = 'Student' ${studentWhere}
     GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
