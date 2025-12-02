@@ -496,8 +496,8 @@ async function familybasesort(
     const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
     
     // sorttype can be godfather_count or children_count
-    // godfather_count: Bu öğrenci kaç kişinin godfatheri (bu öğrenci children dizisinde)
-    // children_count: Bu öğrencinin kaç childreni var (bu öğrenci godfathers dizisinde)
+    // godfather_count: Bu öğrenci kaç kişinin godfatheri (bu öğrenci children dizisinde - p'den geliyor)
+    // children_count: Bu öğrencinin kaç childreni var (bu öğrenci godfathers dizisinde - p2'den geliyor)
     const n1qlQuery = `
         SELECT s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
           s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
@@ -506,14 +506,12 @@ async function familybasesort(
           s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
           s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
           COUNT(DISTINCT p.login) as godfather_count,
-          (SELECT VALUE COUNT(1) 
-           FROM product._default.patronages pg 
-           UNNEST pg.godfathers g 
-           WHERE g.login = s.login AND pg.type = 'Patronage')[0] as children_count,
+          COUNT(DISTINCT p2.login) as children_count,
           CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
         FROM product._default.patronages p
         UNNEST p.children c
         INNER JOIN product._default.students s ON s.login = c.login AND s.type = 'Student'
+        LEFT JOIN product._default.patronages p2 ON p2.type = 'Patronage' AND ANY g IN p2.godfathers SATISFIES g.login = s.login END
         LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
         WHERE p.type = 'Patronage' ${studentWhere}
         GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
