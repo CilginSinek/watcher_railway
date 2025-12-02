@@ -495,21 +495,37 @@ async function familybasesort(
     
     const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
     
+    // sorttype can be godfather_count or children_count
     const n1qlQuery = `
-        SELECT s.*,
-            IFMISSING((SELECT VALUE COUNT(1) FROM product._default.patronages p UNNEST p.children c WHERE c.login = s.login AND p.type = 'Patronage')[0], 0) as godfather_count,
-            IFMISSING((SELECT VALUE COUNT(1) FROM product._default.patronages p UNNEST p.godfathers g WHERE g.login = s.login AND p.type = 'Patronage')[0], 0) as children_count,
-            EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
-        FROM product._default.students s
-        WHERE s.type = 'Student' ${studentWhere}
+        SELECT s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+          s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+          s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+          s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+          s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+          s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
+          SUM(CASE WHEN p.children IS NOT MISSING THEN ARRAY_LENGTH(p.children) ELSE 0 END) as godfather_count,
+          SUM(CASE WHEN p.godfathers IS NOT MISSING THEN ARRAY_LENGTH(p.godfathers) ELSE 0 END) as children_count,
+          EXISTS(SELECT 1 FROM product._default.projects proj WHERE proj.login = s.login AND proj.score = -42 AND proj.type = 'Project') as has_cheats
+        FROM product._default.patronages p
+        UNNEST p.children c
+        INNER JOIN product._default.students s ON s.login = c.login AND s.type = 'Student'
+        WHERE p.type = 'Patronage' ${studentWhere}
+        GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+          s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+          s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+          s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+          s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+          s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt
         ORDER BY ${sorttype} ${order === "asc" ? "ASC" : "DESC"}
         LIMIT ${limit} OFFSET ${skip}
     `;
     
     const countQuery = `
-        SELECT COUNT(*) as total
-        FROM product._default.students s
-        WHERE s.type = 'Student' ${studentWhere}
+        SELECT COUNT(DISTINCT s.login) as total
+        FROM product._default.patronages p
+        UNNEST p.children c
+        INNER JOIN product._default.students s ON s.login = c.login AND s.type = 'Student'
+        WHERE p.type = 'Patronage' ${studentWhere}
     `;
     
     const [queryResult, countResult] = await Promise.all([
@@ -595,27 +611,38 @@ async function logtimesort(
   const campusFilter = campusId ? `l.campusId = ${campusId} AND` : "";
   
   const n1qlQuery = `
-    SELECT s.*,
-      (SELECT SUM(
+    SELECT s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
+      SUM(
         TONUMBER(SPLIT(m.totalDuration, ":")[0]) * 3600 +
         TONUMBER(SPLIT(m.totalDuration, ":")[1]) * 60 +
         TONUMBER(SPLIT(m.totalDuration, ":")[2])
-      )
-      FROM product._default.locationstats l
-      UNNEST OBJECT_NAMES(l.months) mn
-      LET m = l.months[mn]
-      WHERE ${campusFilter} l.login = s.login AND l.type = 'LocationStats')[0] as log_time,
+      ) as log_time,
       EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
-    FROM product._default.students s
-    WHERE s.type = 'Student' ${studentWhere}
+    FROM product._default.locationstats l
+    UNNEST OBJECT_NAMES(l.months) mn
+    LET m = l.months[mn]
+    INNER JOIN product._default.students s ON s.login = l.login AND s.type = 'Student'
+    WHERE ${campusFilter} l.type = 'LocationStats' ${studentWhere}
+    GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
+      s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
+      s.correction_point, s.pool_month, s.pool_year, s.wallet, s.anonymize_date, 
+      s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
+      s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
+      s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt
     ORDER BY log_time ${order === "asc" ? "ASC" : "DESC"}
     LIMIT ${limit} OFFSET ${skip}
   `;
   
   const countQuery = `
-    SELECT COUNT(*) as total
-    FROM product._default.students s
-    WHERE s.type = 'Student' ${studentWhere}
+    SELECT COUNT(DISTINCT l.login) as total
+    FROM product._default.locationstats l
+    INNER JOIN product._default.students s ON s.login = l.login AND s.type = 'Student'
+    WHERE ${campusFilter} l.type = 'LocationStats' ${studentWhere}
   `;
   
   const [queryResult, countResult] = await Promise.all([
