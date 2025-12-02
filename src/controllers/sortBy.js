@@ -85,7 +85,8 @@ async function loginbasesort(
   
   // Simple query - no subqueries needed for basic fields
   const n1qlQuery = `
-    SELECT s.*
+    SELECT s.*,
+      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
     WHERE ${whereClause}
     ORDER BY s.${sorttype} ${order === "asc" ? "ASC" : "DESC"}
@@ -300,7 +301,8 @@ async function projectcountsort(
   
   const n1qlQuery = `
     SELECT s.*,
-      IFMISSING((SELECT VALUE COUNT(1) FROM product._default.projects p WHERE p.login = s.login AND p.status = 'success' AND p.type = 'Project')[0], 0) as project_count
+      IFMISSING((SELECT VALUE COUNT(1) FROM product._default.projects p WHERE p.login = s.login AND p.status = 'success' AND p.type = 'Project')[0], 0) as project_count,
+      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
     ORDER BY project_count ${order === "asc" ? "ASC" : "DESC"}
@@ -397,7 +399,7 @@ async function projectnewcheatsort(
   const n1qlQuery = `
     SELECT s.*,
       (SELECT p FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project' ORDER BY p.updatedAt ${order === "asc" ? "ASC" : "DESC"} LIMIT 1)[0] as latest_cheat_project,
-      1 as has_cheats
+      true as has_cheats
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
       AND EXISTS (SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')
@@ -496,7 +498,8 @@ async function familybasesort(
     const n1qlQuery = `
         SELECT s.*,
             IFMISSING((SELECT VALUE COUNT(1) FROM product._default.patronages p UNNEST p.children c WHERE c.login = s.login AND p.type = 'Patronage')[0], 0) as godfather_count,
-            IFMISSING((SELECT VALUE COUNT(1) FROM product._default.patronages p UNNEST p.godfathers g WHERE g.login = s.login AND p.type = 'Patronage')[0], 0) as children_count
+            IFMISSING((SELECT VALUE COUNT(1) FROM product._default.patronages p UNNEST p.godfathers g WHERE g.login = s.login AND p.type = 'Patronage')[0], 0) as children_count,
+            EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
         FROM product._default.students s
         WHERE s.type = 'Student' ${studentWhere}
         ORDER BY ${sorttype} ${order === "asc" ? "ASC" : "DESC"}
@@ -601,7 +604,8 @@ async function logtimesort(
       FROM product._default.locationstats l
       UNNEST OBJECT_NAMES(l.months) mn
       LET m = l.months[mn]
-      WHERE ${campusFilter} l.login = s.login AND l.type = 'LocationStats')[0] as log_time
+      WHERE ${campusFilter} l.login = s.login AND l.type = 'LocationStats')[0] as log_time,
+      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
     ORDER BY log_time ${order === "asc" ? "ASC" : "DESC"}
@@ -698,7 +702,8 @@ async function feedbackcountsort(
   
   const n1qlQuery = `
     SELECT s.*,
-      IFMISSING((SELECT VALUE COUNT(1) FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.type = 'Feedback')[0], 0) as feedback_count
+      IFMISSING((SELECT VALUE COUNT(1) FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.type = 'Feedback')[0], 0) as feedback_count,
+      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
     ORDER BY feedback_count ${order === "asc" ? "ASC" : "DESC"}
@@ -795,7 +800,8 @@ async function averageratesort(
   
   const n1qlQuery = `
     SELECT s.*,
-      (SELECT AVG(f.rating) FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.rating IS NOT NULL AND f.type = 'Feedback')[0] as avg_rating
+      (SELECT AVG(f.rating) FROM product._default.feedbacks f WHERE ${campusFilter} f.login = s.login AND f.rating IS NOT NULL AND f.type = 'Feedback')[0] as avg_rating,
+      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
     ORDER BY avg_rating ${order === "asc" ? "ASC" : "DESC"}
