@@ -622,9 +622,11 @@ async function logtimesort(
       s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
       s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
       IFNULL((SELECT VALUE SUM(
-        TONUMBER(SPLIT(m.totalDuration, ":")[0]) * 3600 +
-        TONUMBER(SPLIT(m.totalDuration, ":")[1]) * 60 +
-        TONUMBER(SPLIT(m.totalDuration, ":")[2])
+        CASE WHEN m.totalDuration IS NOT NULL AND m.totalDuration != "" 
+        THEN TONUMBER(SPLIT(m.totalDuration, ":")[0]) * 3600 +
+             TONUMBER(SPLIT(m.totalDuration, ":")[1]) * 60 +
+             TONUMBER(SPLIT(m.totalDuration, ":")[2])
+        ELSE 0 END
       )
       FROM product._default.locationstats l
       UNNEST OBJECT_NAMES(l.months) AS mn
@@ -637,6 +639,8 @@ async function logtimesort(
     LIMIT ${limit} OFFSET ${skip}
   `;
   
+  console.log('[logtimesort] Query:', n1qlQuery);
+  
   const countQuery = `
     SELECT COUNT(*) as total
     FROM product._default.students s
@@ -647,6 +651,8 @@ async function logtimesort(
     cluster.query(n1qlQuery),
     cluster.query(countQuery)
   ]);
+  
+  console.log('[logtimesort] First 3 results:', JSON.stringify(queryResult.rows.slice(0, 3), null, 2));
   
   const students = queryResult.rows;
   const total = countResult.rows[0]?.total || 0;
