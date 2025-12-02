@@ -621,7 +621,7 @@ async function logtimesort(
       s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
       s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
       s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-      (SELECT SUM(
+      IFMISSING((SELECT VALUE SUM(
         TONUMBER(SPLIT(m.totalDuration, ":")[0]) * 3600 +
         TONUMBER(SPLIT(m.totalDuration, ":")[1]) * 60 +
         TONUMBER(SPLIT(m.totalDuration, ":")[2])
@@ -629,7 +629,7 @@ async function logtimesort(
       FROM product._default.locationstats l
       UNNEST OBJECT_NAMES(l.months) AS mn
       LET m = l.months[mn]
-      WHERE ${campusFilter} l.login = s.login AND l.type = 'LocationStats')[0] as log_time,
+      WHERE ${campusFilter} l.login = s.login AND l.type = 'LocationStats')[0], 0) as log_time,
       EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
