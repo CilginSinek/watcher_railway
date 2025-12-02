@@ -572,7 +572,7 @@ async function logtimesort(
   }
   if (search) {
     const searchPattern = search.toLowerCase();
-    studentFilters.push(`(LOWER(s.name) LIKE '%${searchPattern}%' OR LOWER(s.displayName) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
+    studentFilters.push(`(LOWER(s.first_name) LIKE '%${searchPattern}%' OR LOWER(s.displayname) LIKE '%${searchPattern}%' OR LOWER(s.login) LIKE '%${searchPattern}%')`);
   }
   
   switch (status) {
@@ -614,32 +614,41 @@ async function logtimesort(
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
   const campusFilter = campusId ? `AND loc.campusId = ${campusId}` : "";
   
-  // Use LET to pre-calculate log_time for each student
+  // Optimized query with proper log_time calculation and cheat detection
   const n1qlQuery = `
-    WITH student_logtimes AS (
-      SELECT s.*, 
+    SELECT s.*,
+      IFNULL(
         (SELECT RAW SUM(
-          TONUMBER(SUBSTR(monthData.totalDuration, 0, 2)) * 3600 +
-          TONUMBER(SUBSTR(monthData.totalDuration, 3, 2)) * 60 +
-          TONUMBER(SUBSTR(monthData.totalDuration, 6, 2))
+          CASE 
+            WHEN monthData.totalDuration IS NOT NULL AND IS_STRING(monthData.totalDuration)
+            THEN (
+              TONUMBER(IFMISSING(SUBSTR(monthData.totalDuration, 0, 2), "0")) * 3600 +
+              TONUMBER(IFMISSING(SUBSTR(monthData.totalDuration, 3, 2), "0")) * 60 +
+              TONUMBER(IFMISSING(SUBSTR(monthData.totalDuration, 6, 2), "0"))
+            )
+            ELSE 0
+          END
         )
         FROM product._default.locationstats loc
-        UNNEST OBJECT_NAMES(loc.months) AS monthKey
-        LET monthData = loc.months[monthKey]
-        WHERE loc.login = s.login AND loc.type = 'LocationStats' ${campusFilter}
-          AND monthData.totalDuration IS NOT NULL)[0] as log_time_calc
-      FROM product._default.students s
-      WHERE s.type = 'Student' ${studentWhere}
-    )
-    SELECT st.id, st.campusId, st.email, st.login, st.first_name, st.last_name, st.usual_full_name, 
-      st.usual_first_name, st.url, st.phone, st.displayname, st.kind, st.image, st.\`staff?\`, 
-      st.correction_point, st.pool_month, st.pool_year, st.wallet, st.anonymize_date, 
-      st.data_erasure_date, st.alumnized_at, st.\`alumni?\`, st.\`active?\`, st.created_at, 
-      st.blackholed, st.next_milestone, st.freeze, st.sinker, st.grade, st.is_piscine, 
-      st.is_trans, st.is_test, st.\`level\`, st.type, st.createdAt, st.updatedAt,
-      IFNULL(st.log_time_calc, 0) as log_time,
-      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = st.login AND p.score = -42 AND p.type = 'Project') as has_cheats
-    FROM student_logtimes st
+        UNNEST OBJECT_PAIRS(loc.months) AS monthPair
+        LET monthData = monthPair.val
+        WHERE loc.type = 'LocationStats' 
+          AND loc.login = s.login 
+          ${campusFilter}
+          AND monthData IS NOT NULL
+        )[0], 
+      0) as log_time,
+      EXISTS(
+        SELECT 1 
+        FROM product._default.projects p 
+        WHERE p.type = 'Project' 
+          AND p.login = s.login 
+          AND p.score = -42
+          ${campusFilter.replace('loc.campusId', 'p.campusId')}
+        LIMIT 1
+      ) as has_cheat
+    FROM product._default.students s
+    WHERE s.type = 'Student' ${studentWhere}
     ORDER BY log_time ${order === "asc" ? "ASC" : "DESC"}
     LIMIT ${limit} OFFSET ${skip}
   `;
@@ -657,7 +666,17 @@ async function logtimesort(
     cluster.query(countQuery)
   ]);
   
-  console.log('[logtimesort] First 3 results:', JSON.stringify(queryResult.rows.slice(0, 3).map(s => ({login: s.login, log_time: s.log_time})), null, 2));
+  console.log('[logtimesort] First 3 results:', 
+    JSON.stringify(
+      queryResult.rows.slice(0, 3).map(s => ({
+        login: s.login, 
+        log_time: s.log_time,
+        has_cheat: s.has_cheat
+      })), 
+      null, 
+      2
+    )
+  );
   
   const students = queryResult.rows;
   const total = countResult.rows[0]?.total || 0;
