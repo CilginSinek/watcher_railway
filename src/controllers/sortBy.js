@@ -614,7 +614,7 @@ async function logtimesort(
   const studentWhere = studentFilters.length > 0 ? "AND " + studentFilters.join(" AND ") : "";
   const campusFilter = campusId ? `AND loc.campusId = ${campusId}` : "";
   
-  // Optimized query with proper log_time calculation and cheat detection
+  // Optimized query - totalDuration'ı direkt parse ediyoruz
   const n1qlQuery = `
     SELECT s.*,
       IFNULL(
@@ -622,16 +622,15 @@ async function logtimesort(
           CASE 
             WHEN monthData.totalDuration IS NOT NULL AND IS_STRING(monthData.totalDuration)
             THEN (
-              TONUMBER(IFMISSING(SUBSTR(monthData.totalDuration, 0, 2), "0")) * 3600 +
-              TONUMBER(IFMISSING(SUBSTR(monthData.totalDuration, 3, 2), "0")) * 60 +
-              TONUMBER(IFMISSING(SUBSTR(monthData.totalDuration, 6, 2), "0"))
+              TONUMBER(SPLIT(monthData.totalDuration, ":")[0]) * 3600 +
+              TONUMBER(SPLIT(monthData.totalDuration, ":")[1]) * 60 +
+              TONUMBER(SPLIT(monthData.totalDuration, ":")[2])
             )
             ELSE 0
           END
         )
         FROM product._default.locationstats loc
-        UNNEST OBJECT_PAIRS(loc.months) AS monthPair
-        LET monthData = monthPair.val
+        UNNEST OBJECT_VALUES(loc.months) AS monthData
         WHERE loc.type = 'LocationStats' 
           AND loc.login = s.login 
           ${campusFilter}
@@ -671,6 +670,7 @@ async function logtimesort(
       queryResult.rows.slice(0, 3).map(s => ({
         login: s.login, 
         log_time: s.log_time,
+        log_time_hours: (s.log_time / 3600).toFixed(2),
         has_cheat: s.has_cheat
       })), 
       null, 
