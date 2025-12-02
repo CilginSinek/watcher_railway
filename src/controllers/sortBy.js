@@ -621,7 +621,7 @@ async function logtimesort(
       s.data_erasure_date, s.alumnized_at, s.\`alumni?\`, s.\`active?\`, s.created_at, 
       s.blackholed, s.next_milestone, s.freeze, s.sinker, s.grade, s.is_piscine, 
       s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
-      IFMISSING((SELECT VALUE SUM(
+      IFNULL((SELECT VALUE SUM(
         TONUMBER(SPLIT(m.totalDuration, ":")[0]) * 3600 +
         TONUMBER(SPLIT(m.totalDuration, ":")[1]) * 60 +
         TONUMBER(SPLIT(m.totalDuration, ":")[2])
