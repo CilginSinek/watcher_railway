@@ -628,9 +628,9 @@ async function logtimesort(
       ) as log_time,
       CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
     FROM product._default.locationstats l
-    UNNEST OBJECT_NAMES(l.months) mn
+    UNNEST OBJECT_NAMES(l.months) AS mn
     LET m = l.months[mn]
-    INNER JOIN product._default.students s ON s.login = l.login AND s.type = 'Student'
+    JOIN product._default.students s ON s.login = l.login AND s.type = 'Student'
     LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
     WHERE ${campusFilter} l.type = 'LocationStats' ${studentWhere}
     GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
