@@ -268,6 +268,7 @@ router.get("/", async (req, res) => {
         .json({ error: "Bad Request", message: validationError.message });
     }
     let students;
+    console.log("Sort by:", validatedSort);
     if (
       validatedSort == "login" ||
       validatedSort == "level" ||
