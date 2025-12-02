@@ -184,7 +184,7 @@ async function projectcheatsort(
   const n1qlQuery = `
     SELECT s.*,
       (SELECT COUNT(*) FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')[0] as cheat_count,
-      ARRAY p FOR p IN product._default.projects WHEN p.login = s.login AND p.score = -42 AND p.type = 'Project' END as has_cheats
+      (SELECT RAW p FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
     FROM product._default.students s
     WHERE s.type = 'Student' ${studentWhere}
       AND EXISTS (SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project')
