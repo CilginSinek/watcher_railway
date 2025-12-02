@@ -505,10 +505,11 @@ async function familybasesort(
           s.is_trans, s.is_test, s.\`level\`, s.type, s.createdAt, s.updatedAt,
           SUM(CASE WHEN p.children IS NOT MISSING THEN ARRAY_LENGTH(p.children) ELSE 0 END) as godfather_count,
           SUM(CASE WHEN p.godfathers IS NOT MISSING THEN ARRAY_LENGTH(p.godfathers) ELSE 0 END) as children_count,
-          EXISTS(SELECT 1 FROM product._default.projects proj WHERE proj.login = s.login AND proj.score = -42 AND proj.type = 'Project') as has_cheats
+          CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
         FROM product._default.patronages p
         UNNEST p.children c
         INNER JOIN product._default.students s ON s.login = c.login AND s.type = 'Student'
+        LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
         WHERE p.type = 'Patronage' ${studentWhere}
         GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
           s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
@@ -622,11 +623,12 @@ async function logtimesort(
         TONUMBER(SPLIT(m.totalDuration, ":")[1]) * 60 +
         TONUMBER(SPLIT(m.totalDuration, ":")[2])
       ) as log_time,
-      EXISTS(SELECT 1 FROM product._default.projects p WHERE p.login = s.login AND p.score = -42 AND p.type = 'Project') as has_cheats
+      CASE WHEN COUNT(cheat.login) > 0 THEN true ELSE false END as has_cheats
     FROM product._default.locationstats l
     UNNEST OBJECT_NAMES(l.months) mn
     LET m = l.months[mn]
     INNER JOIN product._default.students s ON s.login = l.login AND s.type = 'Student'
+    LEFT JOIN product._default.projects cheat ON cheat.login = s.login AND cheat.score = -42 AND cheat.type = 'Project'
     WHERE ${campusFilter} l.type = 'LocationStats' ${studentWhere}
     GROUP BY s.id, s.campusId, s.email, s.login, s.first_name, s.last_name, s.usual_full_name, 
       s.usual_first_name, s.url, s.phone, s.displayname, s.kind, s.image, s.\`staff?\`, 
