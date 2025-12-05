@@ -12,6 +12,7 @@ require('./models');
 // Import routes
 const dashboardRoutes = require('./routes/dashboard');
 const studentsRoutes = require('./routes/students');
+const reviewsRoutes = require('./routes/reviews');
 const userRoutes = require('./routes/user');
 
 const app = express();
@@ -48,6 +49,7 @@ app.use('/api', (req, res, next) => {
 // API Routes
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/students', studentsRoutes);
+app.use('/api/reviews', reviewsRoutes);
 app.use('/api/user', userRoutes);
 
 // 404 handler

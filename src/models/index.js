@@ -69,7 +69,8 @@ const projectSchema = new mongoose.Schema({
   login: { type: String, required: true, index: true },
   project: { type: String, required: true },
   score: { type: Number, required: true },
-  date: { type: String, required: true },
+  date: { type: String, required: true }, // Ana tarih (güncel)
+  penaltyDate: { type: String, default: null }, // Cheat tespit edilip -42 verildiği tarih (varsa)
   status: { 
     type: String, 
     enum: ['success', 'fail', 'in_progress'],
@@ -79,7 +80,7 @@ const projectSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Composite index for projects - aynı kişi aynı projede tekrar çekmesin
-projectSchema.index({ login: 1, project: 1, date: 1 }, { unique: true });
+projectSchema.index({ login: 1, project: 1 }, { unique: true });
 // Optimization: Additional indexes for common queries
 projectSchema.index({ campusId: 1, status: 1 }); // Projects by campus and status
 projectSchema.index({ login: 1, status: 1 }); // User projects by status
