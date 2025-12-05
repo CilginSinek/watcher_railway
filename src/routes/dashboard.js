@@ -32,13 +32,14 @@ router.get('/', async (req, res) => {
         $match: {
           ...campusMatch,
           status: 'success',
-          createdAt: { $gte: monthStart }
+          date: { $gte: currentMonth }
         }
       },
       {
         $group: {
           _id: '$login',
-          projectCount: { $sum: 1 }
+          projectCount: { $sum: 1 },
+          totalScore: { $sum: '$score' }
         }
       },
       {
@@ -54,6 +55,7 @@ router.get('/', async (req, res) => {
         $project: {
           login: '$_id',
           projectCount: 1,
+          totalScore: 1,
           student: {
             id: '$student.id',
             login: '$student.login',
