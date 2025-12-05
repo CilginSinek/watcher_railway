@@ -755,8 +755,6 @@ router.get("/", async (req, res) => {
         sortBy: validatedSort,
         order: validatedOrder,
         pool: validatedPool,
-        grade: validatedGrade,
-        active: validatedActive,
         status: validatedStatus,
         search: validatedSearch,
         page: validatedPage,
