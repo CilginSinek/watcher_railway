@@ -894,6 +894,7 @@ router.get("/", async (req, res) => {
 
     // Log the event
     logEvent(
+      req,
       req.user?.login || 'unknown',
       validatedCampusId || 0,
       'student_list_view',
