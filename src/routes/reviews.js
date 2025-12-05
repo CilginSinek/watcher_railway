@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { ProjectReview, Student } = require("../models");
+const { validateCampusId } = require("../utils/validators");
 
 /**
  * Validate and sanitize login string
@@ -95,6 +96,17 @@ router.get("/statuses", async (req, res) => {
  */
 router.get("/", async (req, res) => {
   try {
+    // Validate campusId
+    let validatedCampusId = null;
+    try {
+      validatedCampusId = validateCampusId(req.query.campusId);
+    } catch (validationError) {
+      return res.status(400).json({
+        error: "Bad Request",
+        message: validationError.message,
+      });
+    }
+
     // Parse and validate pagination
     const page = parseInt(req.query.page, 10);
     const limit = parseInt(req.query.limit, 10);
@@ -105,6 +117,11 @@ router.get("/", async (req, res) => {
 
     // Build filter with validation
     const filter = {};
+
+    // Campus filter
+    if (validatedCampusId !== null) {
+      filter.campusId = validatedCampusId;
+    }
 
     // Project name filter - sanitize
     if (req.query.projectName && typeof req.query.projectName === 'string') {
