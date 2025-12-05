@@ -70,7 +70,12 @@ router.get('/', async (req, res) => {
     
     // 2. All Time Projects
     const allTimeProjects = await Project.aggregate([
-      { $match: campusMatch },
+      { 
+        $match: {
+          ...campusMatch,
+          status: 'success'
+        }
+      },
       {
         $group: {
           _id: '$login',
