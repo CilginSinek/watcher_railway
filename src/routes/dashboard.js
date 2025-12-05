@@ -336,7 +336,8 @@ router.get('/', async (req, res) => {
       allTimeWallet: walletData,
       allTimePoints: pointsData,
       allTimeLevels: levelsData,
-      gradeDistribution
+      gradeDistribution,
+      weeklyOccupancy
     });
     
   } catch (error) {

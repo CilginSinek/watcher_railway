@@ -494,7 +494,7 @@ router.get("/", async (req, res) => {
         break;
 
       case "cheat_date":
-        // Sort by most recent cheat date (penaltyDate)
+        // Sort by most recent cheat date (penaltyDate or date as fallback)
         pipeline = [
           {
             $lookup: {
@@ -511,7 +511,12 @@ router.get("/", async (req, res) => {
                     }
                   }
                 },
-                { $sort: { penaltyDate: -1 } },
+                {
+                  $addFields: {
+                    effectiveDate: { $ifNull: ['$penaltyDate', '$date'] }
+                  }
+                },
+                { $sort: { effectiveDate: -1 } },
                 { $limit: 1 }
               ],
               as: 'cheatProjects'
@@ -519,7 +524,7 @@ router.get("/", async (req, res) => {
           },
           {
             $addFields: {
-              cheat_date: { $arrayElemAt: ['$cheatProjects.penaltyDate', 0] },
+              cheat_date: { $arrayElemAt: ['$cheatProjects.effectiveDate', 0] },
               has_cheats: { $gt: [{ $size: '$cheatProjects' }, 0] }
             }
           },
@@ -544,6 +549,11 @@ router.get("/", async (req, res) => {
                       ]
                     }
                   }
+                },
+                {
+                  $addFields: {
+                    effectiveDate: { $ifNull: ['$penaltyDate', '$date'] }
+                  }
                 }
               ],
               as: 'cheatProjects'
@@ -551,7 +561,7 @@ router.get("/", async (req, res) => {
           },
           {
             $addFields: {
-              cheat_date: { $arrayElemAt: ['$cheatProjects.penaltyDate', 0] }
+              cheat_date: { $arrayElemAt: ['$cheatProjects.effectiveDate', 0] }
             }
           },
           { $match: { ...matchStage, cheat_date: { $ne: null } } },
