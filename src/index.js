@@ -38,6 +38,10 @@ app.options('*', (req, res) => {
   res.sendStatus(200);
 });
 
+// Public endpoints (no auth required)
+app.use('/api/reviews/projectNames', reviewsRoutes);
+app.use('/api/reviews/statuses', reviewsRoutes);
+
 // Apply authentication middleware to /api routes (skip OPTIONS)
 app.use('/api', (req, res, next) => {
   if (req.method === 'OPTIONS') {
