@@ -77,6 +77,7 @@ router.get("/pools", async (req, res) => {
 
     // Log the event
     logEvent(
+      req,
       req.user?.login || 'unknown',
       validatedCampusId || 0,
       'student_pools_view',
@@ -206,6 +207,7 @@ router.get("/:login", async (req, res) => {
 
     // Log the event
     logEvent(
+      req,
       req.user?.login || 'unknown',
       student?.campusId || 0,
       'student_detail_view',

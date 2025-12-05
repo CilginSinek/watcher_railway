@@ -12,6 +12,7 @@ router.get('/me', async (req, res) => {
     
     // Log the event
     logEvent(
+      req,
       req.user?.login || 'unknown',
       req.user?.campus_users?.[0]?.campus_id || 0,
       'user_info_view',

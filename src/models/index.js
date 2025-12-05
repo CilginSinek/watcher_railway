@@ -171,14 +171,33 @@ projectReviewSchema.index({ evaluated: 1, project: 1 }); // Reviews by evaluated
 const eventlogSchema = new mongoose.Schema({
   login: { type: String, required: true, index: true },
   campusId: { type: Number, required: true, index: true },
-  eventType: { type: String, required: true }, // Örn: "login", "project_submitted", vs.
+  eventType: { type: String, required: true }, // Örn: "api_request", "dashboard_view", vs.
   eventData: { type: mongoose.Schema.Types.Mixed }, // Olayla ilgili ek veri (nesne olabilir)
+  // Request details
+  ip: { type: String },
+  userAgent: { type: String },
+  method: { type: String }, // GET, POST, etc.
+  path: { type: String }, // Request path
   timestamp: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-
 eventlogSchema.index({ login: 1, eventType: 1, timestamp: -1 }); // Kullanıcı olayları zaman sırasına göre
 eventlogSchema.index({ campusId: 1, eventType: 1, timestamp: -1 }); // Kampüs olayları zaman sırasına göre
+
+// Session Schema - User sessions
+const sessionSchema = new mongoose.Schema({
+  sessionToken: { type: String, required: true, unique: true, index: true },
+  login: { type: String, required: true, index: true },
+  campusId: { type: Number, required: true },
+  userData: { type: mongoose.Schema.Types.Mixed }, // Full user data from 42 API
+  usedIps: [{ type: String }], // Array of IPs this session was used from
+  lastActivity: { type: Date, default: Date.now, index: true },
+  createdAt: { type: Date, default: Date.now },
+  expiresAt: { type: Date, required: true, index: true }
+}, { timestamps: true });
+
+sessionSchema.index({ login: 1, lastActivity: -1 }); // User sessions by last activity
+sessionSchema.index({ expiresAt: 1 }); // For automatic cleanup of expired sessions
 
 
 // DB1 (Primary) - All data except project reviews
@@ -192,5 +211,6 @@ const Feedback = db1.model("Feedback", feedbackSchema);
 const Student2 = db2.model("Student", studentSchema);
 const ProjectReview = db2.model("ProjectReview", projectReviewSchema);
 const EventLog = db2.model("EventLog", eventlogSchema);
+const Session = db2.model("Session", sessionSchema);
 
-module.exports = { Student, Project, LocationStats, Patronage, Feedback, ProjectReview, Student2, EventLog };
+module.exports = { Student, Project, LocationStats, Patronage, Feedback, ProjectReview, Student2, EventLog, Session };

@@ -1,8 +1,9 @@
-const axios = require('axios');
+const { Session } = require('../models');
 
 /**
- * Middleware to verify 42 Intra authentication
- * Checks the Authorization Bearer token against https://api.intra.42.fr/v2/me
+ * Middleware to verify session-based authentication
+ * Checks the Authorization Bearer token against Session collection
+ * Updates last_activity and tracks IPs
  */
 async function authenticate(req, res, next) {
   try {
@@ -15,28 +16,52 @@ async function authenticate(req, res, next) {
       });
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const sessionToken = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    // Verify token with 42 Intra API
-    const response = await axios.get('https://api.intra.42.fr/v2/me', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+    // Find session in database
+    const session = await Session.findOne({ 
+      sessionToken,
+      expiresAt: { $gt: new Date() } // Check not expired
     });
 
-    // Attach user data to request object for use in routes
-    req.user = response.data;
-    next();
-  } catch (error) {
-    if (error.response) {
-      // 42 API returned an error (invalid token, etc.)
+    if (!session) {
       return res.status(401).json({ 
         error: 'Unauthorized', 
-        message: 'Invalid or expired token' 
+        message: 'Invalid or expired session' 
       });
     }
+
+    // Get client IP
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() 
+                     || req.headers['x-real-ip'] 
+                     || req.socket.remoteAddress 
+                     || req.connection.remoteAddress;
+
+    // Update last_activity and track IP
+    const updates = {
+      lastActivity: new Date()
+    };
+
+    // Add IP to usedIps if not already present
+    if (clientIp && !session.usedIps.includes(clientIp)) {
+      updates.$addToSet = { usedIps: clientIp };
+    }
+
+    await Session.updateOne(
+      { sessionToken },
+      updates
+    );
+
+    // Attach user data to request object for use in routes
+    req.user = session.userData;
+    req.session = {
+      token: sessionToken,
+      login: session.login,
+      campusId: session.campusId
+    };
     
-    // Network or other error
+    next();
+  } catch (error) {
     console.error('Authentication error:', error.message);
     return res.status(500).json({ 
       error: 'Internal Server Error', 
