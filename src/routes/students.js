@@ -317,11 +317,11 @@ router.get("/", async (req, res) => {
         matchStage.grade = 'Transcender';
         break;
       case "cadet":
+        matchStage["active?"] = true;
         matchStage.grade = 'Cadet';
         break;
       case "piscine":
-        matchStage.grade = 'Pisciner';
-        matchStage["active?"] = true;
+        matchStage.is_piscine = true;
         break;
       case "sinker":
         matchStage.sinker = true;
