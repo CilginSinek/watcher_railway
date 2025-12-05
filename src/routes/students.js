@@ -425,7 +425,73 @@ router.get("/", async (req, res) => {
         countPipeline = [{ $match: matchStage }, { $count: 'total' }];
         break;
 
-      case "cheat_count":
+      case "cheat_date":
+        // Sort by most recent cheat date (penaltyDate)
+        pipeline = [
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                },
+                { $sort: { penaltyDate: -1 } },
+                { $limit: 1 }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              cheat_date: { $arrayElemAt: ['$cheatProjects.penaltyDate', 0] },
+              has_cheats: { $gt: [{ $size: '$cheatProjects' }, 0] }
+            }
+          },
+          { $match: { ...matchStage, cheat_date: { $ne: null } } },
+          { $project: { cheatProjects: 0 } },
+          { $sort: { cheat_date: sortOrder } },
+          { $skip: skip },
+          { $limit: validatedLimit }
+        ];
+        countPipeline = [
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              cheat_date: { $arrayElemAt: ['$cheatProjects.penaltyDate', 0] }
+            }
+          },
+          { $match: { ...matchStage, cheat_date: { $ne: null } } },
+          { $count: 'total' }
+        ];
+        break;
+
+      case "godfather_count":
         // Count cheat projects (score = -42)
         pipeline = [
           {

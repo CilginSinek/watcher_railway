@@ -135,7 +135,7 @@ function validateSort(sort) {
   const allowedFields = [
     'login', 'level', 'wallet', 'correction_point',
     'first_name', 'last_name', 'displayname', 'pool_month', 'pool_year',
-    'project_count', 'cheat_count', 'godfather_count', 'children_count',
+    'project_count', 'cheat_count', 'cheat_date', 'godfather_count', 'children_count',
     'log_time', 'evo_performance', 'feedback_count', 'avg_rating'
   ];
   
