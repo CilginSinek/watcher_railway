@@ -425,6 +425,74 @@ router.get("/", async (req, res) => {
         countPipeline = [{ $match: matchStage }, { $count: 'total' }];
         break;
 
+      case "cheat_count":
+        // Count cheat projects (score = -42)
+        pipeline = [
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              cheat_count: { $size: '$cheatProjects' }
+            }
+          },
+          { $match: { ...matchStage, cheat_count: { $gt: 0 } } },
+          {
+            $addFields: {
+              has_cheats: true
+            }
+          },
+          { $project: { cheatProjects: 0 } },
+          { $sort: { cheat_count: sortOrder } },
+          { $skip: skip },
+          { $limit: validatedLimit }
+        ];
+        countPipeline = [
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              cheat_count: { $size: '$cheatProjects' }
+            }
+          },
+          { $match: { ...matchStage, cheat_count: { $gt: 0 } } },
+          { $count: 'total' }
+        ];
+        break;
+
       case "cheat_date":
         // Sort by most recent cheat date (penaltyDate)
         pipeline = [
