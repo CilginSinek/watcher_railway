@@ -85,8 +85,8 @@ router.get("/statuses", async (req, res) => {
  * - page, limit (pagination)
  * - search (comment search)
  * - projectName
- * - evaluator
- * - evaluated
+ * - evaluatorLogin
+ * - evaluatedLogin
  * - score
  * - status
  * - dateFilter (after/before/between)
@@ -115,13 +115,13 @@ router.get("/", async (req, res) => {
     }
 
     // Evaluator filter - sanitize
-    const sanitizedEvaluator = validateLoginString(req.query.evaluator);
+    const sanitizedEvaluator = validateLoginString(req.query.evaluatorLogin);
     if (sanitizedEvaluator) {
       filter.evaluator = new RegExp(sanitizedEvaluator, 'i');
     }
 
     // Evaluated filter - sanitize
-    const sanitizedEvaluated = validateLoginString(req.query.evaluated);
+    const sanitizedEvaluated = validateLoginString(req.query.evaluatedLogin);
     if (sanitizedEvaluated) {
       filter.evaluated = new RegExp(sanitizedEvaluated, 'i');
     }
