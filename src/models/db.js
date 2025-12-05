@@ -1,16 +1,10 @@
 const mongoose = require('mongoose');
 
 // Primary database connection (students, projects, location stats, etc.)
-const db1 = mongoose.createConnection(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+const db1 = mongoose.createConnection(process.env.MONGODB_URI);
 
 // Secondary database connection (API logs, project reviews)
-const db2 = mongoose.createConnection(process.env.MONGODB_URL2, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+const db2 = mongoose.createConnection(process.env.MONGODB_URL2);
 
 // Connection event handlers for db1
 db1.on('connected', () => {
