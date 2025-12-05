@@ -1,8 +1,10 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const db = require('./config/database');
 const authenticate = require('./middleware/auth');
+
+// Import MongoDB connections
+const { db1, db2 } = require('./models/db');
 
 // Import models
 require('./models');
@@ -67,41 +69,55 @@ app.use((err, req, res, next) => {
 // Start server
 async function start() {
   try {
-    // Start Express server first (Railway needs the port to be listening)
+    // Start Express server
     const server = app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📦 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
     
-    // Try to connect to Couchbase with Ottoman (non-blocking)
-    try {
-      await db.connect();
-      console.log('Database connected successfully');
-      
-      // DO NOT call ensureIndexes - it causes memory corruption
-      // Indexes should be created manually in Couchbase UI or via N1QL
-      console.log('Ottoman models ready (manual index management)');
-    } catch (dbError) {
-      console.error('Database connection failed:', dbError.message);
-      console.log('Server running without database connection');
-      // Server continues to run for health checks
-    }
+    // MongoDB connections are already established via require('./models/db')
+    // Just wait for them to connect
+    console.log('⏳ Waiting for MongoDB connections...');
+    
+    // Wait for both connections with timeout
+    const connectionPromises = [
+      new Promise((resolve, reject) => {
+        if (db1.readyState === 1) return resolve();
+        db1.once('connected', resolve);
+        db1.once('error', reject);
+      }),
+      new Promise((resolve, reject) => {
+        if (db2.readyState === 1) return resolve();
+        db2.once('connected', resolve);
+        db2.once('error', reject);
+      })
+    ];
+    
+    await Promise.all(connectionPromises).catch(err => {
+      console.error('⚠️  Some MongoDB connections failed:', err.message);
+      console.log('Server continues running with available connections');
+    });
+    
+    console.log('✅ All database connections ready');
+    
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('❌ Failed to start server:', error);
     process.exit(1);
   }
 }
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
-  console.log('\nShutting down gracefully...');
-  await db.disconnect();
+  console.log('\n🛑 Shutting down gracefully...');
+  await db1.close();
+  await db2.close();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('\nShutting down gracefully...');
-  await db.disconnect();
+  console.log('\n🛑 Shutting down gracefully...');
+  await db1.close();
+  await db2.close();
   process.exit(0);
 });
 

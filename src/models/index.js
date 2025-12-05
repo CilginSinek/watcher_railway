@@ -1,13 +1,12 @@
-const { Schema, model } = require('ottoman');
+const mongoose = require("mongoose");
+const { db1, db2 } = require("./db");
 
-// ---------------------------------------------------------
-// 1. STUDENT MODEL
-// ---------------------------------------------------------
-const studentSchema = new Schema({
-  id: { type: Number, required: true },
-  campusId: { type: Number, required: true },
+// Mongoose Schemas - students.json yapısına göre
+const studentSchema = new mongoose.Schema({
+  id: { type: Number, required: true, unique: true, index: true },
+  campusId: { type: Number, required: true, index: true },
   email: String,
-  login: { type: String, required: true },
+  login: { type: String, required: true, unique: true, index: true },
   first_name: String,
   last_name: String,
   usual_full_name: String,
@@ -32,156 +31,165 @@ const studentSchema = new Schema({
   wallet: Number,
   anonymize_date: String,
   data_erasure_date: String,
-  alumnized_at: String, // Tarih veya null olabiliyor, String/Mixed güvenli
+  created_at: Date,
+  updated_at: Date,
+  alumnized_at: Date,
   "alumni?": Boolean,
   "active?": Boolean,
-  created_at: String,
-  
-  // KRİTİK DEĞİŞİKLİKLER (Null hatasını çözer)
-  blackholed: { type: Schema.Types.Mixed, default: null },
-  next_milestone: { type: Schema.Types.Mixed, default: null },
-  freeze: { type: Schema.Types.Mixed, default: null },
-  sinker: { type: Schema.Types.Mixed, default: null },
-  grade: { type: Schema.Types.Mixed, default: null }, 
-  
+  // Milestone bilgileri
+  blackholed: { type: Boolean, default: null },
+  next_milestone: { type: String, default: null },
+  // Piscine durumu (pool_month/pool_year şu an veya gelecekteyse true)
   is_piscine: { type: Boolean, default: false },
+  // Transfer öğrenci durumu (alumni olursa false)
   is_trans: { type: Boolean, default: false },
+  // Freeze durumu (inactive + agu var)
+  freeze: { type: Boolean, default: null },
+  // Sinker durumu (inactive + agu yok)
+  sinker: { type: Boolean, default: null },
+  // Grade bilgisi (HTML'den alınır)
+  grade: { 
+    type: String, 
+    enum: ['Cadet', 'Pisciner', 'Transcender', 'Alumni', 'Staff'],
+    default: null 
+  },
+  // Test account durumu (HTML'den alınır)
   is_test: { type: Boolean, default: false },
+  // Level bilgisi (HTML'den alınır - örn: 10.64)
   level: { type: Number, default: null }
-}, { 
-  timestamps: true
-});
+}, { timestamps: true });
 
-const Student = model('Student', studentSchema, { 
-  collectionName: 'students',
-  scopeName: '_default',
-  modelKey: 'type'
-});
+// Optimization: Add compound indexes for common queries
+studentSchema.index({ campusId: 1, 'active?': 1 }); // Active students per campus
+studentSchema.index({ campusId: 1, blackholed: 1 }); // Blackholed students
+studentSchema.index({ campusId: 1, grade: 1 }); // Students by grade
 
-// ---------------------------------------------------------
-// 2. PROJECT MODEL
-// ---------------------------------------------------------
-const projectSchema = new Schema({
-  campusId: { type: Number, required: true },
-  login: { type: String, required: true },
+const projectSchema = new mongoose.Schema({
+  campusId: { type: Number, required: true, index: true },
+  login: { type: String, required: true, index: true },
   project: { type: String, required: true },
   score: { type: Number, required: true },
   date: { type: String, required: true },
   status: { 
     type: String, 
     enum: ['success', 'fail', 'in_progress'],
-    required: true
+    required: true,
+    index: true // Index for filtering by status
   }
-}, { 
-  timestamps: true
-});
+}, { timestamps: true });
 
-const Project = model('Project', projectSchema, { 
-  collectionName: 'projects',
-  scopeName: '_default',
-  modelKey: 'type'
-});
+// Composite index for projects - aynı kişi aynı projede tekrar çekmesin
+projectSchema.index({ login: 1, project: 1, date: 1 }, { unique: true });
+// Optimization: Additional indexes for common queries
+projectSchema.index({ campusId: 1, status: 1 }); // Projects by campus and status
+projectSchema.index({ login: 1, status: 1 }); // User projects by status
 
-// ---------------------------------------------------------
-// 3. LOCATION STATS MODEL
-// ---------------------------------------------------------
-const locationStatsSchema = new Schema({
-  login: { type: String, required: true },
-  campusId: { type: Number, required: true },
+// Location Stats Schema - Son 3 ayın lokasyon verileri (tek kayıt per öğrenci)
+const locationStatsSchema = new mongoose.Schema({
+  login: { type: String, required: true, unique: true, index: true },
+  campusId: { type: Number, required: true, index: true },
+  // Her ay için toplam süre ve günlük detaylar
   months: {
-    type: Schema.Types.Mixed, 
+    type: Map,
+    of: {
+      totalDuration: String, // "HH:MM:SS" formatında aylık toplam
+      days: {
+        type: Map,
+        of: String // Gün -> "HH:MM:SS" formatında süre
+      }
+    },
     default: {}
   },
-  lastUpdated: { type: Date, default: () => new Date() }
-}, { 
-  timestamps: true
-});
+  lastUpdated: { type: Date, default: Date.now }
+}, { timestamps: true });
 
-const LocationStats = model('LocationStats', locationStatsSchema, { 
-  collectionName: 'locationstats',
-  scopeName: '_default',
-  modelKey: 'type'
-});
-
-// ---------------------------------------------------------
-// 4. PATRONAGE MODEL
-// ---------------------------------------------------------
-const patronageSchema = new Schema({
-  login: { type: String, required: true },
-  campusId: { type: Number, required: true },
+// Patronage Schema - Godfathers (patroned by) ve Children (patroning)
+const patronageSchema = new mongoose.Schema({
+  login: { type: String, required: true, unique: true, index: true },
+  campusId: { type: Number, required: true, index: true },
+  // Godfathers (patroned by) - Bu kişinin mentorları
   godfathers: [{
     login: { type: String, required: true }
   }],
+  // Children (patroning) - Bu kişinin mentee'leri
   children: [{
     login: { type: String, required: true }
   }],
-  lastUpdated: { type: Date, default: () => new Date() }
-}, { 
-  timestamps: true
-});
+  lastUpdated: { type: Date, default: Date.now }
+}, { timestamps: true });
 
-const Patronage = model('Patronage', patronageSchema, { 
-  collectionName: 'patronages',
-  scopeName: '_default',
-  modelKey: 'type'
-});
-
-// ---------------------------------------------------------
-// 5. FEEDBACK MODEL
-// ---------------------------------------------------------
-const feedbackSchema = new Schema({
-  login: { type: String, required: true },
+// Feedback Schema - Kullanıcılara yapılan evaluation feedback'leri
+const feedbackSchema = new mongoose.Schema({
+  login: { type: String, required: true }, // Feedback alan kişi (sayfanın sahibi)
   campusId: { type: Number, required: true },
-  evaluator: { type: String, required: true },
-  evaluated: { type: String, required: true },
-  project: { type: String, required: true },
-  date: { type: String, required: true },
-  rating: { type: Number, default: null },
+  evaluator: { type: String, required: true }, // Feedback veren kişi (evaluated eden)
+  evaluated: { type: String, required: true }, // Değerlendirilen kişi (evaluated olan)
+  project: { type: String, required: true }, // Hangi proje için
+  date: { type: String, required: true }, // Evaluation tarihi
+  // Feedback puanları
+  rating: { type: Number, default: null }, // 5 üzerinden puan (örn: 5)
+  // Rating detayları obje olarak (Nice, Rigorous, Interested, Punctuality)
   ratingDetails: {
-    nice: { type: Number, default: null },
-    rigorous: { type: Number, default: null },
-    interested: { type: Number, default: null },
-    punctuality: { type: Number, default: null }
+    nice: { type: Number, default: null }, // 4 üzerinden (örn: 4)
+    rigorous: { type: Number, default: null }, // 4 üzerinden (örn: 4)
+    interested: { type: Number, default: null }, // 4 üzerinden (örn: 4)
+    punctuality: { type: Number, default: null } // 4 üzerinden (örn: 4)
   },
-  comment: { type: String, default: null }
-}, { 
-  timestamps: true
-});
+  comment: { type: String, default: null } // Feedback yorumu
+}, { timestamps: true });
 
-const Feedback = model('Feedback', feedbackSchema, { 
-  collectionName: 'feedbacks',
-  scopeName: '_default',
-  modelKey: 'type'
-});
+// Composite index - aynı feedback tekrar kaydedilmesin
+feedbackSchema.index({ login: 1, evaluator: 1, evaluated: 1, project: 1, date: 1 }, { unique: true });
+// Optimization: Additional indexes for common queries
+feedbackSchema.index({ campusId: 1 }); // Feedbacks by campus
+feedbackSchema.index({ login: 1, project: 1 }); // User feedbacks by project
+feedbackSchema.index({ evaluated: 1 }); // Feedbacks by evaluated user
 
-// ---------------------------------------------------------
-// 6. PROJECT REVIEW MODEL
-// ---------------------------------------------------------
-const projectReviewSchema = new Schema({
-  login: { type: String, required: true },
-  campusId: { type: Number, required: true },
-  evaluator: { type: String, required: true },
-  evaluated: { type: String, required: true },
-  project: { type: String, required: true },
-  date: { type: String, required: true },
-  score: { type: Number, default: null },
-  status: { type: String, default: null },
-  evaluatorComment: { type: String, default: null },
-}, { 
-  timestamps: true
-});
+// Project Review Schema - Evaluationlar (iduman evaluated skaynar'ın CPP Module 03 projesini)
+const projectReviewSchema = new mongoose.Schema({
+  campusId: { type: Number, required: true, index: true },
+  evaluator: { type: String, required: true }, // Evoyu yapan kişi (iduman)
+  evaluated: { type: String, required: true, index: true }, // Evoyu alan kişi (skaynar)
+  project: { type: String, required: true }, // Proje ismi (CPP Module 03)
+  date: { type: String, required: true }, // Scheduled tarihi
+  score: { type: Number, default: null }, // Proje puanı (sınırsız)
+  status: { 
+    type: String, 
+    default: null 
+  }, // Proje durumu (ok, invalid_compilation, vs.)
+  evaluatorComment: { type: String, default: null } // Evaluator'ın final-mark comment'i
+}, { timestamps: true });
 
-const ProjectReview = model('ProjectReview', projectReviewSchema, { 
-  collectionName: 'projectreviews',
-  scopeName: '_default',
-  modelKey: 'type'
-});
+// Composite index - aynı review tekrar kaydedilmesin
+projectReviewSchema.index({ evaluator: 1, evaluated: 1, project: 1, date: 1 }, { unique: true });
+// Optimization: Additional indexes
+projectReviewSchema.index({ campusId: 1, status: 1 }); // Reviews by campus and status
+projectReviewSchema.index({ evaluator: 1 }); // Reviews by evaluator
+projectReviewSchema.index({ evaluated: 1, project: 1 }); // Reviews by evaluated user and project
 
-module.exports = { 
-  Student, 
-  Project, 
-  LocationStats, 
-  Patronage, 
-  Feedback, 
-  ProjectReview 
-};
+const eventlogSchema = new mongoose.Schema({
+  login: { type: String, required: true, index: true },
+  campusId: { type: Number, required: true, index: true },
+  eventType: { type: String, required: true }, // Örn: "login", "project_submitted", vs.
+  eventData: { type: mongoose.Schema.Types.Mixed }, // Olayla ilgili ek veri (nesne olabilir)
+  timestamp: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+
+eventlogSchema.index({ login: 1, eventType: 1, timestamp: -1 }); // Kullanıcı olayları zaman sırasına göre
+eventlogSchema.index({ campusId: 1, eventType: 1, timestamp: -1 }); // Kampüs olayları zaman sırasına göre
+
+
+// DB1 (Primary) - All data except project reviews
+const Student = db1.model("Student", studentSchema);
+const Project = db1.model("Project", projectSchema);
+const LocationStats = db1.model("LocationStats", locationStatsSchema);
+const Patronage = db1.model("Patronage", patronageSchema);
+const Feedback = db1.model("Feedback", feedbackSchema);
+
+// DB2 (Secondary) - Only project reviews and students
+const Student2 = db2.model("Student", studentSchema);
+const ProjectReview = db2.model("ProjectReview", projectReviewSchema);
+const EventLog = db2.model("EventLog", eventlogSchema);
+
+module.exports = { Student, Project, LocationStats, Patronage, Feedback, ProjectReview, Student2, EventLog };

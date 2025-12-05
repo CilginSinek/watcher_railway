@@ -7,7 +7,6 @@ const {
   Feedback,
   Patronage,
 } = require("../models");
-const { getDefaultInstance } = require("ottoman");
 const {
   validateCampusId,
   validateLogin,
@@ -21,16 +20,7 @@ const {
   validateActive,
   validateStatus,
 } = require("../utils/validators");
-const {
-  loginbasesort,
-  projectcheatsort,
-  projectcountsort,
-  projectnewcheatsort,
-  familybasesort,
-  logtimesort,
-  feedbackcountsort,
-  averageratesort,
-} = require("../controllers/sortBy");
+const { logEvent } = require("../middleware/logger");
 
 /**
  * GET /api/students/pools?campusId={campusId}
@@ -55,23 +45,43 @@ router.get("/pools", async (req, res) => {
       });
     }
 
-    const filter =
-      validatedCampusId !== null ? { campusId: validatedCampusId } : {};
-    const result = await Student.find(filter);
-    const students = result?.rows || [];
-
-    const poolCount = {};
-    students.forEach((s) => {
-      if (s.pool_month && s.pool_year) {
-        const key = `${s.pool_month}-${s.pool_year}`;
-        poolCount[key] = (poolCount[key] || 0) + 1;
+    const filter = validatedCampusId !== null ? { campusId: validatedCampusId } : {};
+    
+    // Use MongoDB aggregation for better performance
+    const pools = await Student.aggregate([
+      { $match: filter },
+      {
+        $match: {
+          pool_month: { $exists: true, $ne: null },
+          pool_year: { $exists: true, $ne: null }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            month: '$pool_month',
+            year: '$pool_year'
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          month: '$_id.month',
+          year: '$_id.year',
+          count: 1
+        }
       }
-    });
+    ]);
 
-    const pools = Object.entries(poolCount).map(([key, count]) => {
-      const [month, year] = key.split("-");
-      return { month, year, count };
-    });
+    // Log the event
+    logEvent(
+      req.user?.login || 'unknown',
+      validatedCampusId || 0,
+      'student_pools_view',
+      { campusId: validatedCampusId, poolCount: pools.length }
+    );
 
     res.json({ pools });
   } catch (error) {
@@ -105,14 +115,13 @@ router.get("/:login", async (req, res) => {
       });
     }
 
-    const student = await Student.findOne({ login: validatedLogin });
+    const student = await Student.findOne({ login: validatedLogin }).lean();
     if (!student) {
       return res.status(404).json({ error: "Student not found" });
     }
 
     // Get projects
-    const projectsResult = await Project.find({ login: validatedLogin });
-    const projects = projectsResult?.rows || [];
+    const projects = await Project.find({ login: validatedLogin }).lean();
     const projectsData = projects.map((p) => ({
       project: p.project,
       login: p.login,
@@ -123,9 +132,7 @@ router.get("/:login", async (req, res) => {
     }));
 
     // Get location stats
-    const locationResult = await LocationStats.find({ login: validatedLogin });
-    const locationStats = locationResult?.rows || [];
-    const locationData = locationStats.length > 0 ? locationStats[0] : null;
+    const locationData = await LocationStats.findOne({ login: validatedLogin }).lean();
 
     // Parse logTimes and attendanceDays
     let logTimes = [];
@@ -141,16 +148,15 @@ router.get("/:login", async (req, res) => {
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
     if (locationData?.months) {
-      Object.entries(locationData.months).forEach(([monthKey, monthData]) => {
+      for (const [monthKey, monthData] of Object.entries(locationData.months)) {
         if (monthData.days) {
-          Object.entries(monthData.days).forEach(([day, durationStr]) => {
+          for (const [day, durationStr] of Object.entries(monthData.days)) {
             if (durationStr && durationStr !== "00:00:00") {
               const parts = durationStr.split(":");
               const hours = parseInt(parts[0]) || 0;
               const minutes = parseInt(parts[1]) || 0;
               const seconds = parseInt(parts[2]) || 0;
-              const totalMinutes =
-                hours * 60 + minutes + Math.floor(seconds / 60);
+              const totalMinutes = hours * 60 + minutes + Math.floor(seconds / 60);
 
               const date = `${monthKey}-${day.padStart(2, "0")}`;
               logTimes.push({ date, duration: totalMinutes });
@@ -163,14 +169,13 @@ router.get("/:login", async (req, res) => {
                 }
               }
             }
-          });
+          }
         }
-      });
+      }
     }
 
     // Get feedbacks
-    const feedbacksResult = await Feedback.find({ login: validatedLogin });
-    const feedbacks = feedbacksResult?.rows || [];
+    const feedbacks = await Feedback.find({ evaluated: validatedLogin }).lean();
     const feedbackCount = feedbacks.length;
     const avgRating =
       feedbackCount > 0
@@ -195,12 +200,17 @@ router.get("/:login", async (req, res) => {
     }));
 
     // Get patronage
-    const patronageResult = await Patronage.find({ login: validatedLogin });
-    const patronageData = patronageResult?.rows || [];
-    const children =
-      patronageData.length > 0 ? patronageData[0].children || [] : [];
-    const godfathers =
-      patronageData.length > 0 ? patronageData[0].godfathers || [] : [];
+    const patronageData = await Patronage.findOne({ login: validatedLogin }).lean();
+    const children = patronageData?.children || [];
+    const godfathers = patronageData?.godfathers || [];
+
+    // Log the event
+    logEvent(
+      req.user?.login || 'unknown',
+      student?.campusId || 0,
+      'student_detail_view',
+      { viewedLogin: validatedLogin, hasProjects: projects.length > 0 }
+    );
 
     res.json({
       student: {
@@ -240,15 +250,6 @@ router.get("/:login", async (req, res) => {
  */
 router.get("/", async (req, res) => {
   try {
-    if (!Student) {
-      return res
-        .status(503)
-        .json({
-          error: "Service Unavailable",
-          message: "Database models not initialized",
-        });
-    }
-
     // Validate inputs
     let validatedCampusId, validatedSearch, validatedPool, validatedStatus;
     let validatedSort, validatedOrder, validatedLimit, validatedPage;
@@ -267,105 +268,513 @@ router.get("/", async (req, res) => {
         .status(400)
         .json({ error: "Bad Request", message: validationError.message });
     }
-    let students;
-    console.log("Sort by:", validatedSort);
-    if (
-      validatedSort == "login" ||
-      validatedSort == "level" ||
-      validatedSort == "wallet" ||
-      validatedSort == "correction_point"
-    ) {
-      students = await loginbasesort(
-        validatedCampusId,
-        validatedStatus,
-        validatedPool,
-        validatedSearch,
-        validatedOrder,
-        validatedLimit,
-        validatedPage,
-        validatedSort
-      );
-    } else if (validatedSort == "project_count") {
-      students = await projectcountsort(
-        validatedCampusId,
-        validatedStatus,
-        validatedPool,
-        validatedSearch,
-        validatedOrder,
-        validatedLimit,
-        validatedPage
-      );
-    } else if (validatedSort == "cheat_count") {
-      students = await projectcheatsort(
-        validatedCampusId,
-        validatedStatus,
-        validatedPool,
-        validatedSearch,
-        validatedOrder,
-        validatedLimit,
-        validatedPage
-      );
-    } else if (validatedSort == "new_cheat") {
-      students = await projectnewcheatsort(
-        validatedCampusId,
-        validatedStatus,
-        validatedPool,
-        validatedSearch,
-        validatedOrder,
-        validatedLimit,
-        validatedPage
-      );
-    } else if (
-      validatedSort == "godfather_count" ||
-      validatedSort == "children_count"
-    ) {
-      students = await familybasesort(
-        validatedCampusId,
-        validatedStatus,
-        validatedPool,
-        validatedSearch,
-        validatedOrder,
-        validatedLimit,
-        validatedPage,
-        validatedSort
-      );
-    } else if (validatedSort == "log_time") {
-      students = await logtimesort(
-        validatedCampusId,
-        validatedStatus,
-        validatedPool,
-        validatedSearch,
-        validatedOrder,
-        validatedLimit,
-        validatedPage
-      );
-    } else if (validatedSort == "feedback_count") {
-      students = await feedbackcountsort(
-        validatedCampusId,
-        validatedStatus,
-        validatedPool,
-        validatedSearch,
-        validatedOrder,
-        validatedLimit,
-        validatedPage
-      );
-    } else if (validatedSort == "avg_rating") {
-      students = await averageratesort(
-        validatedCampusId,
-        validatedStatus,
-        validatedPool,
-        validatedSearch,
-        validatedOrder,
-        validatedLimit,
-        validatedPage
-      );
-    } else {
-      res
-        .status(400)
-        .json({ error: "Bad Request", message: "Invalid sort field" });
-      return;
+
+    const skip = (validatedPage - 1) * validatedLimit;
+    const sortOrder = validatedOrder === 'asc' ? 1 : -1;
+
+    // Build match filters
+    const matchStage = {};
+    
+    if (validatedCampusId !== null) {
+      matchStage.campusId = validatedCampusId;
     }
-    res.json(students);
+    
+    if (validatedPool) {
+      matchStage.pool_month = validatedPool.month;
+      matchStage.pool_year = validatedPool.year;
+    }
+    
+    if (validatedSearch) {
+      const searchRegex = new RegExp(validatedSearch, 'i');
+      matchStage.$or = [
+        { login: searchRegex },
+        { displayname: searchRegex },
+        { email: searchRegex }
+      ];
+    }
+    
+    // Status filters
+    switch (validatedStatus) {
+      case "active":
+        matchStage["active?"] = true;
+        break;
+      case "inactive":
+        matchStage["active?"] = false;
+        break;
+      case "test":
+        matchStage.is_test = true;
+        break;
+      case "alumni":
+        matchStage["alumni?"] = true;
+        break;
+      case "staff":
+        matchStage["staff?"] = true;
+        break;
+      case "blackholed":
+        matchStage.blackholed = true;
+        break;
+      case "transcender":
+        matchStage.grade = 'Transcender';
+        break;
+      case "cadet":
+        matchStage.grade = 'Cadet';
+        break;
+      case "piscine":
+        matchStage.grade = 'Pisciner';
+        matchStage["active?"] = true;
+        break;
+      case "sinker":
+        matchStage.sinker = true;
+        break;
+      case "freeze":
+        matchStage.freeze = true;
+        break;
+    }
+
+    let pipeline = [];
+    let countPipeline = [];
+
+    // Build aggregation pipeline based on sort type
+    switch (validatedSort) {
+      case "login":
+      case "level":
+      case "wallet":
+      case "correction_point":
+        // Simple field sort
+        pipeline = [
+          { $match: matchStage },
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                },
+                { $limit: 1 }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              has_cheats: { $gt: [{ $size: '$cheatProjects' }, 0] }
+            }
+          },
+          { $project: { cheatProjects: 0 } },
+          { $sort: { [validatedSort]: sortOrder } },
+          { $skip: skip },
+          { $limit: validatedLimit }
+        ];
+        countPipeline = [{ $match: matchStage }, { $count: 'total' }];
+        break;
+
+      case "project_count":
+        // Count projects per student
+        pipeline = [
+          { $match: matchStage },
+          {
+            $lookup: {
+              from: 'projects',
+              localField: 'login',
+              foreignField: 'login',
+              as: 'projects'
+            }
+          },
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                },
+                { $limit: 1 }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              project_count: { $size: '$projects' },
+              has_cheats: { $gt: [{ $size: '$cheatProjects' }, 0] }
+            }
+          },
+          { $project: { projects: 0, cheatProjects: 0 } },
+          { $sort: { project_count: sortOrder } },
+          { $skip: skip },
+          { $limit: validatedLimit }
+        ];
+        countPipeline = [{ $match: matchStage }, { $count: 'total' }];
+        break;
+
+      case "cheat_count":
+        // Count cheat projects (score = -42)
+        pipeline = [
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              cheat_count: { $size: '$cheatProjects' }
+            }
+          },
+          { $match: { ...matchStage, cheat_count: { $gt: 0 } } },
+          {
+            $addFields: {
+              has_cheats: true
+            }
+          },
+          { $project: { cheatProjects: 0 } },
+          { $sort: { cheat_count: sortOrder } },
+          { $skip: skip },
+          { $limit: validatedLimit }
+        ];
+        countPipeline = [
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              cheat_count: { $size: '$cheatProjects' }
+            }
+          },
+          { $match: { ...matchStage, cheat_count: { $gt: 0 } } },
+          { $count: 'total' }
+        ];
+        break;
+
+      case "godfather_count":
+      case "children_count":
+        // Patronage counts
+        pipeline = [
+          { $match: matchStage },
+          {
+            $lookup: {
+              from: 'patronages',
+              localField: 'login',
+              foreignField: 'login',
+              as: 'patronage'
+            }
+          },
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                },
+                { $limit: 1 }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              godfather_count: {
+                $size: {
+                  $ifNull: [{ $arrayElemAt: ['$patronage.godfathers', 0] }, []]
+                }
+              },
+              children_count: {
+                $size: {
+                  $ifNull: [{ $arrayElemAt: ['$patronage.children', 0] }, []]
+                }
+              },
+              has_cheats: { $gt: [{ $size: '$cheatProjects' }, 0] }
+            }
+          },
+          { $project: { patronage: 0, cheatProjects: 0 } },
+          { $sort: { [validatedSort]: sortOrder } },
+          { $skip: skip },
+          { $limit: validatedLimit }
+        ];
+        countPipeline = [{ $match: matchStage }, { $count: 'total' }];
+        break;
+
+      case "log_time":
+        // Calculate total log time from LocationStats
+        pipeline = [
+          { $match: matchStage },
+          {
+            $lookup: {
+              from: 'locationstats',
+              localField: 'login',
+              foreignField: 'login',
+              as: 'locationData'
+            }
+          },
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                },
+                { $limit: 1 }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              log_time: {
+                $reduce: {
+                  input: { $objectToArray: { $ifNull: [{ $arrayElemAt: ['$locationData.months', 0] }, {}] } },
+                  initialValue: 0,
+                  in: {
+                    $add: [
+                      '$$value',
+                      {
+                        $reduce: {
+                          input: { $objectToArray: { $ifNull: ['$$this.v.days', {}] } },
+                          initialValue: 0,
+                          in: {
+                            $let: {
+                              vars: {
+                                parts: { $split: ['$$this.v', ':'] },
+                                hours: { $toInt: { $arrayElemAt: [{ $split: ['$$this.v', ':'] }, 0] } },
+                                minutes: { $toInt: { $arrayElemAt: [{ $split: ['$$this.v', ':'] }, 1] } },
+                                seconds: { $toInt: { $arrayElemAt: [{ $split: ['$$this.v', ':'] }, 2] } }
+                              },
+                              in: {
+                                $add: [
+                                  '$$value',
+                                  { $multiply: ['$$hours', 3600] },
+                                  { $multiply: ['$$minutes', 60] },
+                                  '$$seconds'
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              has_cheats: { $gt: [{ $size: '$cheatProjects' }, 0] }
+            }
+          },
+          { $project: { locationData: 0, cheatProjects: 0 } },
+          { $sort: { log_time: sortOrder } },
+          { $skip: skip },
+          { $limit: validatedLimit }
+        ];
+        countPipeline = [{ $match: matchStage }, { $count: 'total' }];
+        break;
+
+      case "feedback_count":
+        // Count feedbacks where student was evaluated
+        pipeline = [
+          { $match: matchStage },
+          {
+            $lookup: {
+              from: 'feedbacks',
+              localField: 'login',
+              foreignField: 'evaluated',
+              as: 'feedbacks'
+            }
+          },
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                },
+                { $limit: 1 }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              feedback_count: { $size: '$feedbacks' },
+              has_cheats: { $gt: [{ $size: '$cheatProjects' }, 0] }
+            }
+          },
+          { $project: { feedbacks: 0, cheatProjects: 0 } },
+          { $sort: { feedback_count: sortOrder } },
+          { $skip: skip },
+          { $limit: validatedLimit }
+        ];
+        countPipeline = [{ $match: matchStage }, { $count: 'total' }];
+        break;
+
+      case "avg_rating":
+        // Average feedback rating
+        pipeline = [
+          { $match: matchStage },
+          {
+            $lookup: {
+              from: 'feedbacks',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$evaluated', '$$studentLogin'] },
+                        { $ne: ['$rating', null] }
+                      ]
+                    }
+                  }
+                }
+              ],
+              as: 'feedbacks'
+            }
+          },
+          {
+            $lookup: {
+              from: 'projects',
+              let: { studentLogin: '$login' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$login', '$$studentLogin'] },
+                        { $eq: ['$score', -42] }
+                      ]
+                    }
+                  }
+                },
+                { $limit: 1 }
+              ],
+              as: 'cheatProjects'
+            }
+          },
+          {
+            $addFields: {
+              avg_rating: { $avg: '$feedbacks.rating' },
+              has_cheats: { $gt: [{ $size: '$cheatProjects' }, 0] }
+            }
+          },
+          { $project: { feedbacks: 0, cheatProjects: 0 } },
+          { $sort: { avg_rating: sortOrder } },
+          { $skip: skip },
+          { $limit: validatedLimit }
+        ];
+        countPipeline = [{ $match: matchStage }, { $count: 'total' }];
+        break;
+
+      default:
+        return res.status(400).json({ 
+          error: "Bad Request", 
+          message: "Invalid sort field" 
+        });
+    }
+
+    // Execute aggregation and count in parallel
+    const [students, countResult] = await Promise.all([
+      Student.aggregate(pipeline),
+      Student.aggregate(countPipeline)
+    ]);
+
+    const total = countResult.length > 0 ? countResult[0].total : 0;
+    const totalPages = Math.ceil(total / validatedLimit);
+
+    // Log the event
+    logEvent(
+      req.user?.login || 'unknown',
+      validatedCampusId || 0,
+      'student_list_view',
+      {
+        campusId: validatedCampusId,
+        sortBy: validatedSort,
+        order: validatedOrder,
+        pool: validatedPool,
+        grade: validatedGrade,
+        active: validatedActive,
+        status: validatedStatus,
+        search: validatedSearch,
+        page: validatedPage,
+        limit: validatedLimit,
+        totalResults: total
+      }
+    );
+
+    res.json({
+      students,
+      pagination: {
+        total,
+        page: validatedPage,
+        limit: validatedLimit,
+        totalPages
+      }
+    });
+
   } catch (error) {
     console.error("Students list error:", error);
     res
