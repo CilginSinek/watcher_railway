@@ -130,6 +130,7 @@ router.get("/:login", async (req, res) => {
       status: p.status,
       date: p.date,
       campusId: p.campusId,
+      penaltyDate: p.penaltyDate,
     }));
 
     // Get location stats

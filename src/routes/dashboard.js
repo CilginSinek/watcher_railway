@@ -26,7 +26,7 @@ router.get('/', async (req, res) => {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const campusMatch = validatedCampusId !== null ? { campusId: validatedCampusId } : {};
     
-    // 1. Top Project Submitters (current month)
+    // 1. Top Project Submitters (current month) - Most submitted projects
     const topProjectSubmitters = await Project.aggregate([
       {
         $match: {
@@ -38,8 +38,7 @@ router.get('/', async (req, res) => {
       {
         $group: {
           _id: '$login',
-          projectCount: { $sum: 1 },
-          totalScore: { $sum: '$score' }
+          projectCount: { $sum: 1 }
         }
       },
       {
@@ -55,7 +54,6 @@ router.get('/', async (req, res) => {
         $project: {
           login: '$_id',
           projectCount: 1,
-          totalScore: 1,
           student: {
             id: '$student.id',
             login: '$student.login',
@@ -338,9 +336,7 @@ router.get('/', async (req, res) => {
       allTimeWallet: walletData,
       allTimePoints: pointsData,
       allTimeLevels: levelsData,
-      gradeDistribution,
-      hourlyOccupancy,
-      weeklyOccupancy
+      gradeDistribution
     });
     
   } catch (error) {
