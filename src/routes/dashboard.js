@@ -289,26 +289,39 @@ router.get('/', async (req, res) => {
       studentMap[s.login] = s;
     });
     
-    const topLocationStats = Object.entries(timeByStudent)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([login, totalMinutes]) => {
-        const student = studentMap[login];
-        const hours = Math.floor(totalMinutes / 60);
-        const minutes = totalMinutes % 60;
-        
-        return {
-          login,
-          totalDuration: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`,
-          student: student ? {
-            login: student.login,
-            displayname: student.displayname,
-            image: student.image,
-            correction_point: student.correction_point,
-            wallet: student.wallet
-          } : null
-        };
-      });
+    const topLocationStats = await Promise.all(
+      Object.entries(timeByStudent)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(async ([login, totalMinutes]) => {
+          const student = studentMap[login];
+          const hours = Math.floor(totalMinutes / 60);
+          const minutes = totalMinutes % 60;
+          
+          let studentData = null;
+          if (student) {
+            const projectCount = await Project.countDocuments({
+              login: student.login,
+              status: 'success'
+            });
+            
+            studentData = {
+              login: student.login,
+              displayname: student.displayname,
+              image: student.image,
+              correction_point: student.correction_point,
+              wallet: student.wallet,
+              project_count: projectCount
+            };
+          }
+          
+          return {
+            login,
+            totalDuration: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`,
+            student: studentData
+          };
+        })
+    );
     
     // 8. Hourly and Weekly Occupancy
     const threeMonthsAgoDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
