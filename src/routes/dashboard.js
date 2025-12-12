@@ -52,6 +52,26 @@ router.get('/', async (req, res) => {
       },
       { $unwind: { path: '$student', preserveNullAndEmptyArrays: true } },
       {
+        $lookup: {
+          from: 'projects',
+          let: { studentLogin: '$student.login' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$login', '$$studentLogin'] },
+                    { $eq: ['$status', 'success'] }
+                  ]
+                }
+              }
+            },
+            { $count: 'total' }
+          ],
+          as: 'totalProjects'
+        }
+      },
+      {
         $project: {
           login: '$_id',
           projectCount: 1,
@@ -60,7 +80,10 @@ router.get('/', async (req, res) => {
             id: '$student.id',
             login: '$student.login',
             displayname: '$student.displayname',
-            image: '$student.image'
+            image: '$student.image',
+            correction_point: '$student.correction_point',
+            wallet: '$student.wallet',
+            projectCount: { $ifNull: [{ $arrayElemAt: ['$totalProjects.total', 0] }, 0] }
           }
         }
       },
@@ -110,61 +133,91 @@ router.get('/', async (req, res) => {
     ]);
     
     // 3. All Time Wallet
-    const walletData = await Student.find(campusMatch)
+    const walletStudents = await Student.find(campusMatch)
       .select('id login displayname image correction_point wallet')
       .sort({ wallet: -1 })
       .limit(10)
-      .lean()
-      .then(students => students.map(s => ({
-        login: s.login,
-        wallet: s.wallet || 0,
-        student: {
-          id: s.id,
+      .lean();
+    
+    const walletData = await Promise.all(
+      walletStudents.map(async (s) => {
+        const projectCount = await Project.countDocuments({
           login: s.login,
-          displayname: s.displayname,
-          image: s.image,
-          correction_point: s.correction_point,
-          wallet: s.wallet
-        }
-      })));
+          status: 'success'
+        });
+        return {
+          login: s.login,
+          wallet: s.wallet || 0,
+          student: {
+            id: s.id,
+            login: s.login,
+            displayname: s.displayname,
+            image: s.image,
+            correction_point: s.correction_point,
+            wallet: s.wallet,
+            projectCount
+          }
+        };
+      })
+    );
     
     // 4. All Time Correction Points
-    const pointsData = await Student.find(campusMatch)
+    const pointsStudents = await Student.find(campusMatch)
       .select('id login displayname image correction_point wallet')
       .sort({ correction_point: -1 })
       .limit(10)
-      .lean()
-      .then(students => students.map(s => ({
-        login: s.login,
-        correctionPoint: s.correction_point || 0,
-        student: {
-          id: s.id,
+      .lean();
+    
+    const pointsData = await Promise.all(
+      pointsStudents.map(async (s) => {
+        const projectCount = await Project.countDocuments({
           login: s.login,
-          displayname: s.displayname,
-          image: s.image,
-          correction_point: s.correction_point,
-          wallet: s.wallet
-        }
-      })));
+          status: 'success'
+        });
+        return {
+          login: s.login,
+          correctionPoint: s.correction_point || 0,
+          student: {
+            id: s.id,
+            login: s.login,
+            displayname: s.displayname,
+            image: s.image,
+            correction_point: s.correction_point,
+            wallet: s.wallet,
+            projectCount
+          }
+        };
+      })
+    );
     
     // 5. All Time Levels
-    const levelsData = await Student.find(campusMatch)
+    const levelsStudents = await Student.find(campusMatch)
       .select('id login displayname image correction_point wallet level')
       .sort({ level: -1 })
       .limit(10)
-      .lean()
-      .then(students => students.map(s => ({
-        login: s.login,
-        level: s.level || 0,
-        student: {
-          id: s.id,
+      .lean();
+    
+    const levelsData = await Promise.all(
+      levelsStudents.map(async (s) => {
+        const projectCount = await Project.countDocuments({
           login: s.login,
-          displayname: s.displayname,
-          image: s.image,
-          correction_point: s.correction_point,
-          wallet: s.wallet
-        }
-      })));
+          status: 'success'
+        });
+        return {
+          login: s.login,
+          level: s.level || 0,
+          student: {
+            id: s.id,
+            login: s.login,
+            displayname: s.displayname,
+            image: s.image,
+            correction_point: s.correction_point,
+            wallet: s.wallet,
+            projectCount
+          }
+        };
+      })
+    );
     
     // 6. Grade Distribution
     const gradeDistribution = await Student.aggregate([
