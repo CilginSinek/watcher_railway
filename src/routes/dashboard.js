@@ -83,7 +83,7 @@ router.get('/', async (req, res) => {
             image: '$student.image',
             correction_point: '$student.correction_point',
             wallet: '$student.wallet',
-            projectCount: { $ifNull: [{ $arrayElemAt: ['$totalProjects.total', 0] }, 0] }
+            project_count: { $ifNull: [{ $arrayElemAt: ['$totalProjects.total', 0] }, 0] }
           }
         }
       },
@@ -124,7 +124,8 @@ router.get('/', async (req, res) => {
             displayname: '$student.displayname',
             image: '$student.image',
             correction_point: '$student.correction_point',
-            wallet: '$student.wallet'
+            wallet: '$student.wallet',
+            project_count: '$projectCount'
           }
         }
       },
@@ -155,7 +156,7 @@ router.get('/', async (req, res) => {
             image: s.image,
             correction_point: s.correction_point,
             wallet: s.wallet,
-            projectCount
+            project_count: projectCount
           }
         };
       })
@@ -184,7 +185,7 @@ router.get('/', async (req, res) => {
             image: s.image,
             correction_point: s.correction_point,
             wallet: s.wallet,
-            projectCount
+            project_count: projectCount
           }
         };
       })
@@ -213,7 +214,7 @@ router.get('/', async (req, res) => {
             image: s.image,
             correction_point: s.correction_point,
             wallet: s.wallet,
-            projectCount
+            project_count: projectCount
           }
         };
       })
