@@ -1,4 +1,4 @@
-const { Session } = require('../models');
+const { Session, BannedUser } = require('../models');
 
 /**
  * Middleware to verify session-based authentication
@@ -28,6 +28,16 @@ async function authenticate(req, res, next) {
       return res.status(401).json({ 
         error: 'Unauthorized', 
         message: 'Invalid or expired session' 
+      });
+    }
+
+    // Check if user is banned
+    const bannedRecord = await BannedUser.findOne({login: session.login, expiresAt: { $gt: new Date() } });
+
+    if (bannedRecord) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: `User is banned${bannedRecord.reason ? `: ${bannedRecord.reason}` : ''}`
       });
     }
 

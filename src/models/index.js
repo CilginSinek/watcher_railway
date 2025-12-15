@@ -199,6 +199,14 @@ const sessionSchema = new mongoose.Schema({
 sessionSchema.index({ login: 1, lastActivity: -1 }); // User sessions by last activity
 sessionSchema.index({ expiresAt: 1 }); // For automatic cleanup of expired sessions
 
+const bannedUserSchema = new mongoose.Schema({
+  login: { type: String, required: true, unique: true, index: true },
+  campusId: { type: Number, required: true },
+  reason: { type: String, default: null },
+  createdAt: { type: Date, default: Date.now },
+  expiresAt: { type: Date, default: null }
+}, { timestamps: true });
+
 
 // DB1 (Primary) - All data except project reviews
 const Student = db1.model("Student", studentSchema);
@@ -212,5 +220,6 @@ const Student2 = db2.model("Student", studentSchema);
 const ProjectReview = db2.model("ProjectReview", projectReviewSchema);
 const EventLog = db2.model("EventLog", eventlogSchema);
 const Session = db2.model("Session", sessionSchema);
+const BannedUser = db2.model("BannedUser", bannedUserSchema);
 
-module.exports = { Student, Project, LocationStats, Patronage, Feedback, ProjectReview, Student2, EventLog, Session };
+module.exports = { Student, Project, LocationStats, Patronage, Feedback, ProjectReview, Student2, EventLog, Session, BannedUser };
