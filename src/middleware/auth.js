@@ -32,7 +32,10 @@ async function authenticate(req, res, next) {
     }
 
     // Check if user is banned
-    const bannedRecord = await BannedUser.findOne({login: session.login, expiresAt: { $gt: new Date() } });
+    const bannedRecord = await BannedUser.findOne({login: session.login, $or:[
+      { expiresAt: null },
+      { expiresAt: { $gt: new Date() } }
+    ] });
 
     if (bannedRecord) {
       return res.status(403).json({
