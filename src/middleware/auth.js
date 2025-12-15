@@ -38,6 +38,7 @@ async function authenticate(req, res, next) {
     ] });
 
     if (bannedRecord) {
+      await session.deleteOne();
       return res.status(403).json({
         error: 'Forbidden',
         message: `User is banned${bannedRecord.reason ? `: ${bannedRecord.reason}` : ''}`
