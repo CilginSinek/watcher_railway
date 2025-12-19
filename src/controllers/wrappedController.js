@@ -373,7 +373,7 @@ function generateWrappedSummary(data) {
   labels.splice(4);
 
   // Generate summary
-  const totalActivity = stats.totalProjects + stats.totalReviews + stats.totalFeedbacks;
+  const totalActivity = stats.totalProjects + stats.totalReviews;
   
   if (totalActivity > 200) {
     summary.headline = "Yoğun bir yıl geçirdin!";
