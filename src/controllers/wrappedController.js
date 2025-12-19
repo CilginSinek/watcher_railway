@@ -378,10 +378,10 @@ function generateWrappedSummary(data) {
   if (totalActivity > 200) {
     summary.headline = "Yoğun bir yıl geçirdin!";
     summary.shortDescription = `${stats.totalProjects} proje teslim, ${stats.totalReviews} review ve ${stats.totalFeedbacks} feedback ile dolu bir 2025.`;
-  } else if (totalActivity > 140) {
+  } else if (totalActivity > 110) {
     summary.headline = "Güzel bir ilerleme kaydedildi";
     summary.shortDescription = `2025'te ${stats.totalProjects} projeye giriş yapıldı ve toplulukla ${stats.totalReviews + stats.totalFeedbacks} etkileşim gerçekleştirildi.`;
-  } else if (totalActivity > 75) {
+  } else if (totalActivity > 50) {
     summary.headline = "Başlangıçlar yapıldı";
     summary.shortDescription = `İlk adımlar atıldı. ${stats.totalProjects} proje deneyimi ve ${stats.totalReviews + stats.totalFeedbacks} topluluk etkileşimi.`;
   } else {
