@@ -375,7 +375,7 @@ function generateWrappedSummary(data) {
   // Generate summary
   const totalActivity = stats.totalProjects + stats.totalReviews;
   
-  if (totalActivity > 220) {
+  if (totalActivity > 200) {
     summary.headline = "Yoğun bir yıl geçirdin!";
     summary.shortDescription = `${stats.totalProjects} proje teslim, ${stats.totalReviews} review ve ${stats.totalFeedbacks} feedback ile dolu bir 2025.`;
   } else if (totalActivity > 140) {
