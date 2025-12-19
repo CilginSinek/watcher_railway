@@ -123,9 +123,9 @@ router.get("/wrapped/:login", async (req, res) => {
       return res.status(404).json({ error: "Student not found" });
     }
 
-    // Get 2025 date range
-    const year2025Start = new Date('2025-01-01T00:00:00Z');
-    const year2025End = new Date('2025-12-31T23:59:59Z');
+    // Get 2025 date range (as strings for string comparison in DB)
+    const year2025Start = '2025-01-01T00:00:00.000Z';
+    const year2025End = '2025-12-31T23:59:59.999Z';
 
     // Fetch all necessary data in parallel
     const [projects, projectReviews, feedbacks, patronage] = await Promise.all([
