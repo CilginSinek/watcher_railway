@@ -6,6 +6,7 @@ const {
   LocationStats,
   Feedback,
   Patronage,
+  ProjectReview,
 } = require("../models");
 const {
   validateCampusId,
@@ -21,6 +22,7 @@ const {
   validateStatus,
 } = require("../utils/validators");
 const { logEvent } = require("../middleware/logger");
+const { generateWrappedSummary } = require("../controllers/wrappedController");
 
 /**
  * GET /api/students/pools?campusId={campusId}
@@ -92,6 +94,93 @@ router.get("/pools", async (req, res) => {
       .json({ error: "Failed to fetch pools data", message: error.message });
   }
 });
+
+/**
+ * GET /api/students/wrapped/:login
+ * Student wrapped route - 2025 year summary
+ */
+router.get("/wrapped/:login", async (req, res) => {
+  try {
+    if (!Student || !Project || !Feedback || !Patronage) {
+      return res.status(503).json({
+        error: "Service Unavailable",
+        message: "Database models not initialized",
+      });
+    }
+
+    let validatedLogin;
+    try {
+      validatedLogin = validateLogin(req.params.login);
+    } catch (validationError) {
+      return res.status(400).json({
+        error: "Bad Request",
+        message: validationError.message,
+      });
+    }
+
+    const student = await Student.findOne({ login: validatedLogin }).lean();
+    if (!student) {
+      return res.status(404).json({ error: "Student not found" });
+    }
+
+    // Get 2025 date range
+    const year2025Start = new Date('2025-01-01T00:00:00Z');
+    const year2025End = new Date('2025-12-31T23:59:59Z');
+
+    // Fetch all necessary data in parallel
+    const [projects, projectReviews, feedbacks, patronage] = await Promise.all([
+      Project.find({
+        login: validatedLogin,
+        date: { $gte: year2025Start, $lte: year2025End }
+      }).lean(),
+      
+      ProjectReview.find({
+        evaluator: validatedLogin,
+        $or: [
+          { createdAt: { $gte: year2025Start, $lte: year2025End } },
+          { date: { $gte: year2025Start, $lte: year2025End } }
+        ]
+      }).lean(),
+      
+      Feedback.find({
+        evaluator: validatedLogin,
+        $or: [
+          { createdAt: { $gte: year2025Start, $lte: year2025End } },
+          { date: { $gte: year2025Start, $lte: year2025End } }
+        ]
+      }).lean(),
+      
+      Patronage.findOne({ login: validatedLogin }).lean()
+    ]);
+
+    // Generate wrapped summary
+    const wrappedData = generateWrappedSummary({
+      student,
+      projects,
+      projectReviews,
+      feedbacks,
+      patronage
+    });
+
+    // Log the event
+    logEvent(
+      req,
+      req.user?.login || 'unknown',
+      student?.campusId || 0,
+      'student_wrapped_view',
+      { viewedLogin: validatedLogin, year: 2025 }
+    );
+
+    res.json(wrappedData);
+  } catch (error) {
+    console.error("Wrapped generation error:", error);
+    res.status(500).json({ 
+      error: "Failed to generate wrapped summary", 
+      message: error.message 
+    });
+  }
+});
+
 
 /**
  * GET /api/students/:login
