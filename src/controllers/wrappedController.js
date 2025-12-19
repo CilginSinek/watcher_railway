@@ -298,7 +298,42 @@ function generateWrappedSummary(data) {
   const hasRepeatedAttempts = mostAttemptedProject && mostAttemptedProject[1] >= 5;
   const hasMoreFeedbackThanProjects = stats.totalFeedbacks > stats.totalProjects && stats.totalProjects < 10;
   const hasMentorRole = (stats.children || 0) > 2;
-  const hasQuietPeriod = highlights.quietestPeriod && highlights.quietestPeriod.days > 14;
+  
+  // Check if user went back to a project after success
+  const projectSuccessMap = {};
+  projects.forEach(p => {
+    const { name } = parseProjectName(p.project);
+    if (!projectSuccessMap[name]) {
+      projectSuccessMap[name] = [];
+    }
+    projectSuccessMap[name].push({
+      date: new Date(p.date),
+      status: p.status,
+      score: p.score
+    });
+  });
+  
+  let hasReturnedAfterSuccess = false;
+  Object.values(projectSuccessMap).forEach(attempts => {
+    attempts.sort((a, b) => a.date - b.date);
+    let hadSuccess = false;
+    for (const attempt of attempts) {
+      if (hadSuccess && (attempt.status === 'success' || attempt.status === 'finished') && attempt.score > 0) {
+        hasReturnedAfterSuccess = true;
+        break;
+      }
+      if ((attempt.status === 'success' || attempt.status === 'finished') && attempt.score > 0) {
+        hadSuccess = true;
+      }
+    }
+  });
+  
+  // Check success rate for "Kendinden emin"
+  const totalAttempts = projects.length;
+  const successfulProjects = projects.filter(p => (p.status === 'success' || p.status === 'finished') && p.score > 0).length;
+  const failedProjects = projects.filter(p => p.status === 'fail' || p.score === 0).length;
+  const successRate = totalAttempts > 0 ? (successfulProjects / totalAttempts) * 100 : 0;
+  const hasHighSuccessRate = successRate >= 80 && totalAttempts >= 5;
 
   if (hasRepeatedAttempts) {
     labels.push("Vazgeçmeyen");
@@ -312,8 +347,12 @@ function generateWrappedSummary(data) {
     labels.push("Mentor ruhlu");
   }
 
-  if (hasQuietPeriod && !hasLowActivity) {
+  if (hasReturnedAfterSuccess) {
     labels.push("Geri dönen");
+  }
+  
+  if (hasHighSuccessRate) {
+    labels.push("Kendinden emin");
   }
 
   if (hasLowActivity) {
