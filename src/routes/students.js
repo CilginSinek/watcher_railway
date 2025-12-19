@@ -136,18 +136,12 @@ router.get("/wrapped/:login", async (req, res) => {
       
       ProjectReview.find({
         evaluator: validatedLogin,
-        $or: [
-          { createdAt: { $gte: year2025Start, $lte: year2025End } },
-          { date: { $gte: year2025Start, $lte: year2025End } }
-        ]
+        date: { $gte: year2025Start, $lte: year2025End }
       }).lean(),
       
       Feedback.find({
         evaluator: validatedLogin,
-        $or: [
-          { createdAt: { $gte: year2025Start, $lte: year2025End } },
-          { date: { $gte: year2025Start, $lte: year2025End } }
-        ]
+        date: { $gte: year2025Start, $lte: year2025End }
       }).lean(),
       
       Patronage.findOne({ login: validatedLogin }).lean()
