@@ -86,19 +86,21 @@ function generateWrappedSummary(data) {
 
   // Analyze project reviews (as reviewer)
   const reviewedProjects = {};
-  const reviewedUsers = {};
+  const reviewedUsersGiven = {};
+  const reviewedUsersReceived = {};
+  
   projectReviews.forEach(pr => {
     if (pr.project) {
       reviewedProjects[pr.project] = (reviewedProjects[pr.project] || 0) + 1;
     }
+    // As evaluator (giving review)
     if (pr.evaluated) {
-      reviewedUsers[pr.evaluated] = (reviewedUsers[pr.evaluated] || 0) + 1;
+      reviewedUsersGiven[pr.evaluated] = (reviewedUsersGiven[pr.evaluated] || 0) + 1;
     }
+    // As evaluated (receiving review) - would need different query
   });
 
   const mostReviewedProject = Object.entries(reviewedProjects)
-    .sort((a, b) => b[1] - a[1])[0];
-  const mostReviewedUser = Object.entries(reviewedUsers)
     .sort((a, b) => b[1] - a[1])[0];
 
   if (mostReviewedProject) {
@@ -108,28 +110,39 @@ function generateWrappedSummary(data) {
     };
   }
 
-  if (mostReviewedUser) {
-    highlights.mostReviewedUser = {
-      login: mostReviewedUser[0],
-      count: mostReviewedUser[1]
-    };
-  }
-
-  // Analyze feedbacks (as evaluator)
-  const feedbackUsers = {};
+  // Analyze feedbacks
+  const feedbackUsersGiven = {};
+  const feedbackUsersReceived = {};
+  
   feedbacks.forEach(fb => {
+    // As evaluator (giving feedback)
     if (fb.evaluated) {
-      feedbackUsers[fb.evaluated] = (feedbackUsers[fb.evaluated] || 0) + 1;
+      feedbackUsersGiven[fb.evaluated] = (feedbackUsersGiven[fb.evaluated] || 0) + 1;
     }
+    // As evaluated (receiving feedback) - would need different query
   });
 
-  const mostFeedbackUser = Object.entries(feedbackUsers)
+  // Combined: Most given (review + feedback)
+  const combinedGiven = {};
+  Object.entries(reviewedUsersGiven).forEach(([login, count]) => {
+    combinedGiven[login] = (combinedGiven[login] || 0) + count;
+  });
+  Object.entries(feedbackUsersGiven).forEach(([login, count]) => {
+    combinedGiven[login] = (combinedGiven[login] || 0) + count;
+  });
+
+  const mostInteractedUserGiven = Object.entries(combinedGiven)
     .sort((a, b) => b[1] - a[1])[0];
 
-  if (mostFeedbackUser) {
-    highlights.mostFeedbackGiven = {
-      login: mostFeedbackUser[0],
-      count: mostFeedbackUser[1]
+  if (mostInteractedUserGiven) {
+    const reviewCount = reviewedUsersGiven[mostInteractedUserGiven[0]] || 0;
+    const feedbackCount = feedbackUsersGiven[mostInteractedUserGiven[0]] || 0;
+    
+    highlights.mostEvaluatedUser = {
+      login: mostInteractedUserGiven[0],
+      totalCount: mostInteractedUserGiven[1],
+      reviewCount,
+      feedbackCount
     };
   }
 
@@ -150,34 +163,46 @@ function generateWrappedSummary(data) {
 
   // Activity analysis
   const allActivityDates = [
-    ...projects.map(p => p.date).filter(Boolean),
-    ...projectReviews.map(pr => pr.createdAt || pr.date).filter(Boolean),
-    ...feedbacks.map(fb => fb.createdAt || fb.date).filter(Boolean)
-  ].map(d => new Date(d));
+    ...projects.map(p => ({ date: p.date, type: 'project' })).filter(a => a.date),
+    ...projectReviews.map(pr => ({ date: pr.createdAt || pr.date, type: 'review' })).filter(a => a.date),
+    ...feedbacks.map(fb => ({ date: fb.createdAt || fb.date, type: 'feedback' })).filter(a => a.date)
+  ];
 
-  // Find most active week
+  // Find most active week with breakdown
   const weekActivity = {};
-  allActivityDates.forEach(date => {
+  allActivityDates.forEach(activity => {
+    const date = new Date(activity.date);
     if (isNaN(date.getTime())) return;
     const weekStart = new Date(date);
     weekStart.setDate(date.getDate() - date.getDay());
     const weekKey = weekStart.toISOString().split('T')[0];
-    weekActivity[weekKey] = (weekActivity[weekKey] || 0) + 1;
+    
+    if (!weekActivity[weekKey]) {
+      weekActivity[weekKey] = { total: 0, projects: 0, reviews: 0, feedbacks: 0 };
+    }
+    weekActivity[weekKey].total++;
+    if (activity.type === 'project') weekActivity[weekKey].projects++;
+    if (activity.type === 'review') weekActivity[weekKey].reviews++;
+    if (activity.type === 'feedback') weekActivity[weekKey].feedbacks++;
   });
 
   const mostActiveWeek = Object.entries(weekActivity)
-    .sort((a, b) => b[1] - a[1])[0];
+    .sort((a, b) => b[1].total - a[1].total)[0];
 
   if (mostActiveWeek) {
     highlights.mostActiveWeek = {
       week: mostActiveWeek[0],
-      activities: mostActiveWeek[1]
+      total: mostActiveWeek[1].total,
+      projects: mostActiveWeek[1].projects,
+      reviews: mostActiveWeek[1].reviews,
+      feedbacks: mostActiveWeek[1].feedbacks
     };
   }
 
   // Find quietest period (30-day windows with no activity)
-  if (allActivityDates.length > 1) {
-    const sortedDates = allActivityDates.sort((a, b) => a - b);
+  const allDates = allActivityDates.map(a => new Date(a.date));
+  if (allDates.length > 1) {
+    const sortedDates = allDates.sort((a, b) => a - b);
     let longestGap = 0;
     let gapStart = null;
     
@@ -201,7 +226,7 @@ function generateWrappedSummary(data) {
   stats.totalProjects = projects.length;
   stats.totalReviews = projectReviews.length;
   stats.totalFeedbacks = feedbacks.length;
-  stats.passedProjects = projects.filter(p => p.status === 'finished' && p.score >= 0).length;
+  stats.passedProjects = projects.filter(p => (p.status === 'finished' || p.status === 'success') && p.score > 0).length;
   stats.avgProjectScore = projects.length > 0
     ? Math.round(projects.reduce((sum, p) => sum + (p.score || 0), 0) / projects.length)
     : 0;
