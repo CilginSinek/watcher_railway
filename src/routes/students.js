@@ -128,7 +128,7 @@ router.get("/wrapped/:login", async (req, res) => {
     const year2025End = '2025-12-31T23:59:59.999Z';
 
     // Fetch all necessary data in parallel
-    const [projects, projectReviews, feedbacks, patronage] = await Promise.all([
+    const [projects, projectReviews, feedbacks, projectReviewsReceived, feedbacksReceived, patronage] = await Promise.all([
       Project.find({
         login: validatedLogin,
         date: { $gte: year2025Start, $lte: year2025End }
@@ -144,6 +144,16 @@ router.get("/wrapped/:login", async (req, res) => {
         date: { $gte: year2025Start, $lte: year2025End }
       }).lean(),
       
+      ProjectReview.find({
+        evaluated: validatedLogin,
+        date: { $gte: year2025Start, $lte: year2025End }
+      }).lean(),
+      
+      Feedback.find({
+        evaluated: validatedLogin,
+        date: { $gte: year2025Start, $lte: year2025End }
+      }).lean(),
+      
       Patronage.findOne({ login: validatedLogin }).lean()
     ]);
 
@@ -153,6 +163,8 @@ router.get("/wrapped/:login", async (req, res) => {
       projects,
       projectReviews,
       feedbacks,
+      projectReviewsReceived,
+      feedbacksReceived,
       patronage
     });
 

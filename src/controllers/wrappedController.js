@@ -9,6 +9,8 @@ function generateWrappedSummary(data) {
     projects = [],
     projectReviews = [],
     feedbacks = [],
+    projectReviewsReceived = [],
+    feedbacksReceived = [],
     patronage = null,
   } = data;
 
@@ -69,18 +71,16 @@ function generateWrappedSummary(data) {
   const mostAttemptedProject = Object.entries(projectAttempts)
     .sort((a, b) => b[1] - a[1])[0];
 
-  if (mostAttemptedProject && mostAttemptedProject[1] > 1) {
+  // Combine attempts count with retry number for most attempted project
+  if (mostAttemptedProject && (mostAttemptedProject[1] > 1 || maxRetryCount > 0)) {
+    const projectName = mostAttemptedProject ? mostAttemptedProject[0] : maxRetryProject;
+    const attempts = mostAttemptedProject ? mostAttemptedProject[1] : 0;
+    const retries = maxRetryProject === projectName ? maxRetryCount : 0;
+    
     highlights.mostAttemptedProject = {
-      name: mostAttemptedProject[0],
-      attempts: mostAttemptedProject[1]
-    };
-  }
-
-  // Add retry count highlight if exists
-  if (maxRetryCount > 0 && maxRetryProject) {
-    highlights.highestRetryCount = {
-      project: maxRetryProject,
-      retries: maxRetryCount
+      name: projectName,
+      attempts: Math.max(attempts, retries + 1),
+      retries: retries
     };
   }
 
@@ -97,7 +97,13 @@ function generateWrappedSummary(data) {
     if (pr.evaluated) {
       reviewedUsersGiven[pr.evaluated] = (reviewedUsersGiven[pr.evaluated] || 0) + 1;
     }
-    // As evaluated (receiving review) - would need different query
+  });
+
+  // Process received reviews
+  projectReviewsReceived.forEach(pr => {
+    if (pr.evaluator) {
+      reviewedUsersReceived[pr.evaluator] = (reviewedUsersReceived[pr.evaluator] || 0) + 1;
+    }
   });
 
   const mostReviewedProject = Object.entries(reviewedProjects)
@@ -119,7 +125,13 @@ function generateWrappedSummary(data) {
     if (fb.evaluated) {
       feedbackUsersGiven[fb.evaluated] = (feedbackUsersGiven[fb.evaluated] || 0) + 1;
     }
-    // As evaluated (receiving feedback) - would need different query
+  });
+
+  // Process received feedbacks
+  feedbacksReceived.forEach(fb => {
+    if (fb.evaluator) {
+      feedbackUsersReceived[fb.evaluator] = (feedbackUsersReceived[fb.evaluator] || 0) + 1;
+    }
   });
 
   // Combined: Most given (review + feedback)
@@ -141,6 +153,30 @@ function generateWrappedSummary(data) {
     highlights.mostEvaluatedUser = {
       login: mostInteractedUserGiven[0],
       totalCount: mostInteractedUserGiven[1],
+      reviewCount,
+      feedbackCount
+    };
+  }
+
+  // Combined: Most received (review + feedback)
+  const combinedReceived = {};
+  Object.entries(reviewedUsersReceived).forEach(([login, count]) => {
+    combinedReceived[login] = (combinedReceived[login] || 0) + count;
+  });
+  Object.entries(feedbackUsersReceived).forEach(([login, count]) => {
+    combinedReceived[login] = (combinedReceived[login] || 0) + count;
+  });
+
+  const mostInteractedUserReceived = Object.entries(combinedReceived)
+    .sort((a, b) => b[1] - a[1])[0];
+
+  if (mostInteractedUserReceived) {
+    const reviewCount = reviewedUsersReceived[mostInteractedUserReceived[0]] || 0;
+    const feedbackCount = feedbackUsersReceived[mostInteractedUserReceived[0]] || 0;
+    
+    highlights.mostEvaluatorUser = {
+      login: mostInteractedUserReceived[0],
+      totalCount: mostInteractedUserReceived[1],
       reviewCount,
       feedbackCount
     };
@@ -199,18 +235,38 @@ function generateWrappedSummary(data) {
     };
   }
 
-  // Find quietest period (30-day windows with no activity)
+  // Find quietest period (starting from first libft attempt)
   const allDates = allActivityDates.map(a => new Date(a.date));
-  if (allDates.length > 1) {
-    const sortedDates = allDates.sort((a, b) => a - b);
+  
+  // Find first libft project date
+  const libftProjects = projects.filter(p => {
+    const { name } = parseProjectName(p.project);
+    return name.toLowerCase().includes('libft');
+  });
+  
+  let startDate = null;
+  if (libftProjects.length > 0) {
+    const libftDates = libftProjects.map(p => new Date(p.date)).filter(d => !isNaN(d.getTime()));
+    if (libftDates.length > 0) {
+      startDate = new Date(Math.min(...libftDates));
+    }
+  }
+  
+  // If no libft, use first activity date
+  if (!startDate && allDates.length > 0) {
+    startDate = new Date(Math.min(...allDates));
+  }
+  
+  if (startDate && allDates.length > 1) {
+    const filteredDates = allDates.filter(d => d >= startDate).sort((a, b) => a - b);
     let longestGap = 0;
     let gapStart = null;
     
-    for (let i = 1; i < sortedDates.length; i++) {
-      const gap = (sortedDates[i] - sortedDates[i - 1]) / (1000 * 60 * 60 * 24);
+    for (let i = 1; i < filteredDates.length; i++) {
+      const gap = (filteredDates[i] - filteredDates[i - 1]) / (1000 * 60 * 60 * 24);
       if (gap > longestGap) {
         longestGap = gap;
-        gapStart = sortedDates[i - 1];
+        gapStart = filteredDates[i - 1];
       }
     }
 
