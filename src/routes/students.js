@@ -202,6 +202,11 @@ router.get("/wrapped/:login", async (req, res) => {
       displayname: student.displayname,
       image: student.image
     }
+    wrappedData.watcherUser = {
+      login: req.user?.login || 'unknown',
+      displayname: req.user?.displayname || 'Unknown User',
+      image: req.user?.image || null
+    }
     // Log the event
     logEvent(
       req,
