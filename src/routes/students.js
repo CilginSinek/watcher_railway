@@ -197,7 +197,11 @@ router.get("/wrapped/:login", async (req, res) => {
         wrappedData.highlights.mostEvaluatorUser.image = loginImageMap[wrappedData.highlights.mostEvaluatorUser.login] || null;
       }
     }
-
+    wrappedData.user = {
+      login: student.login,
+      displayname: student.displayname,
+      image: student.image
+    }
     // Log the event
     logEvent(
       req,
@@ -207,7 +211,7 @@ router.get("/wrapped/:login", async (req, res) => {
       { viewedLogin: validatedLogin, year: 2025 }
     );
 
-    res.json(wrappedData);
+    res.status(200).json(wrappedData);
   } catch (error) {
     console.error("Wrapped generation error:", error);
     res.status(500).json({ 
