@@ -200,8 +200,8 @@ function generateWrappedSummary(data) {
   // Activity analysis
   const allActivityDates = [
     ...projects.map(p => ({ date: p.date, type: 'project' })).filter(a => a.date),
-    ...projectReviews.map(pr => ({ date: pr.createdAt || pr.date, type: 'review' })).filter(a => a.date),
-    ...feedbacks.map(fb => ({ date: fb.createdAt || fb.date, type: 'feedback' })).filter(a => a.date)
+    ...projectReviews.map(pr => ({ date: pr.date, type: 'review' })).filter(a => a.date),
+    ...feedbacks.map(fb => ({ date: fb.date, type: 'feedback' })).filter(a => a.date)
   ];
 
   // Find most active week with breakdown
