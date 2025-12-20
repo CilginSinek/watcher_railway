@@ -169,7 +169,7 @@ router.get("/wrapped/:login", async (req, res) => {
       // Special query for word analysis - only comments from feedbacks given by the user
       Feedback.find(
         {
-          evaluator: validatedLogin,
+          evaluated: validatedLogin,
           date: { $gte: year2025Start, $lte: year2025End },
           comment: { $exists: true, $ne: null, $ne: '' }
         },
