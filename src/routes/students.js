@@ -168,6 +168,36 @@ router.get("/wrapped/:login", async (req, res) => {
       patronage
     });
 
+    // Collect all unique logins from highlights to fetch their images
+    const loginsToFetch = new Set();
+    if (wrappedData.highlights?.mostEvaluatedUser?.login) {
+      loginsToFetch.add(wrappedData.highlights.mostEvaluatedUser.login);
+    }
+    if (wrappedData.highlights?.mostEvaluatorUser?.login) {
+      loginsToFetch.add(wrappedData.highlights.mostEvaluatorUser.login);
+    }
+
+    // Fetch student images for all logins
+    if (loginsToFetch.size > 0) {
+      const students = await Student.find(
+        { login: { $in: Array.from(loginsToFetch) } },
+        { login: 1, image: 1 }
+      ).lean();
+
+      const loginImageMap = {};
+      students.forEach(s => {
+        loginImageMap[s.login] = s.image;
+      });
+
+      // Add images to highlights
+      if (wrappedData.highlights?.mostEvaluatedUser?.login) {
+        wrappedData.highlights.mostEvaluatedUser.image = loginImageMap[wrappedData.highlights.mostEvaluatedUser.login] || null;
+      }
+      if (wrappedData.highlights?.mostEvaluatorUser?.login) {
+        wrappedData.highlights.mostEvaluatorUser.image = loginImageMap[wrappedData.highlights.mostEvaluatorUser.login] || null;
+      }
+    }
+
     // Log the event
     logEvent(
       req,
