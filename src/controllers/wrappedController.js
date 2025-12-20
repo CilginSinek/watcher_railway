@@ -12,6 +12,8 @@ function generateWrappedSummary(data) {
     projectReviewsReceived = [],
     feedbacksReceived = [],
     patronage = null,
+    projectReviewsForWords = [],
+    feedbacksForWords = [],
   } = data;
 
   const summary = {};
@@ -182,10 +184,10 @@ function generateWrappedSummary(data) {
     };
   }
 
-  // Most used words (from reviews and feedbacks)
+  // Most used words (from reviews and feedbacks) - using special filtered data
   const allTexts = [
-    ...projectReviews.map(pr => pr.comment).filter(Boolean),
-    ...feedbacks.map(fb => fb.comment).filter(Boolean)
+    ...projectReviewsForWords.map(pr => pr.comment).filter(Boolean),
+    ...feedbacksForWords.map(fb => fb.comment).filter(Boolean)
   ];
 
   const wordFrequency = extractWords(allTexts);

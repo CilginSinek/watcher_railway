@@ -128,7 +128,7 @@ router.get("/wrapped/:login", async (req, res) => {
     const year2025End = '2025-12-31T23:59:59.999Z';
 
     // Fetch all necessary data in parallel
-    const [projects, projectReviews, feedbacks, projectReviewsReceived, feedbacksReceived, patronage] = await Promise.all([
+    const [projects, projectReviews, feedbacks, projectReviewsReceived, feedbacksReceived, patronage, projectReviewsForWords, feedbacksForWords] = await Promise.all([
       Project.find({
         login: validatedLogin,
         date: { $gte: year2025Start, $lte: year2025End }
@@ -154,7 +154,27 @@ router.get("/wrapped/:login", async (req, res) => {
         date: { $gte: year2025Start, $lte: year2025End }
       }).lean(),
       
-      Patronage.findOne({ login: validatedLogin }).lean()
+      Patronage.findOne({ login: validatedLogin }).lean(),
+      
+      // Special query for word analysis - only comments from reviews given by the user
+      ProjectReview.find(
+        {
+          evaluator: validatedLogin,
+          date: { $gte: year2025Start, $lte: year2025End },
+          comment: { $exists: true, $ne: null, $ne: '' }
+        },
+        { comment: 1, _id: 0 }
+      ).lean(),
+      
+      // Special query for word analysis - only comments from feedbacks given by the user
+      Feedback.find(
+        {
+          evaluator: validatedLogin,
+          date: { $gte: year2025Start, $lte: year2025End },
+          comment: { $exists: true, $ne: null, $ne: '' }
+        },
+        { comment: 1, _id: 0 }
+      ).lean()
     ]);
 
     // Generate wrapped summary
@@ -165,7 +185,9 @@ router.get("/wrapped/:login", async (req, res) => {
       feedbacks,
       projectReviewsReceived,
       feedbacksReceived,
-      patronage
+      patronage,
+      projectReviewsForWords,
+      feedbacksForWords
     });
 
     // Collect all unique logins from highlights to fetch their images
