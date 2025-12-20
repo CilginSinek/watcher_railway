@@ -366,7 +366,9 @@ function generateWrappedSummary(data) {
   }
 
   if (labels.length === 0) {
-    labels.push("Keşif aşamasında");
+    // Check if student is from 2025 pool
+    const isNewStudent = student?.pool_year === '2025';
+    labels.push(isNewStudent ? "Keşif aşamasında" : "Dönüş yılı");
   }
 
   // Limit to 4 labels
@@ -374,6 +376,7 @@ function generateWrappedSummary(data) {
 
   // Generate summary
   const totalActivity = stats.totalProjects + stats.totalReviews;
+  const isNewStudent = student?.pool_year === '2025';
   
   if (totalActivity > 200) {
     summary.headline = "Yoğun bir yıl geçirdin!";
@@ -385,11 +388,21 @@ function generateWrappedSummary(data) {
     summary.headline = "Başlangıçlar yapıldı";
     summary.shortDescription = `İlk adımlar atıldı. ${stats.totalProjects} proje deneyimi ve ${stats.totalReviews + stats.totalFeedbacks} topluluk etkileşimi.`;
   } else {
-    summary.headline = "Keşif yılı";
-    summary.shortDescription = "2025 yolculuğun başlangıcı oldu. Her büyük hikaye bir adımla başlar.";
+    if (isNewStudent) {
+      summary.headline = "Keşif yılı";
+      summary.shortDescription = "2025 yolculuğun başlangıcı oldu. Her büyük hikaye bir adımla başlar.";
+    } else {
+      summary.headline = "Ara yıl";
+      summary.shortDescription = "2025'te yavaş bir tempo. Bazen durup nefes almak da gerekir.";
+    }
     if (fallbackNotes.length === 0) {
-      fallbackNotes.push("Yeni başlangıçlar heyecan verici");
-      fallbackNotes.push("İlk adımlar en değerlileri");
+      if (isNewStudent) {
+        fallbackNotes.push("Yeni başlangıçlar heyecan verici");
+        fallbackNotes.push("İlk adımlar en değerlileri");
+      } else {
+        fallbackNotes.push("Her hız farklı bir ritim gerektirir");
+        fallbackNotes.push("Geri dönüş her zaman mümkün");
+      }
     }
   }
 
